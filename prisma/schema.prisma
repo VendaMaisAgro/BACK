@@ -1,0 +1,302 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AcceptanceRole {
+  BUYER
+  SELLER
+}
+
+enum SaleStatus {
+  CART
+  AWAITING_SELLER_CONFIRMATION
+  CONFIRMED
+  REJECTED
+}
+
+enum ContractKind {
+  sale_tos
+  terms_of_use
+  privacy_policy
+  sale_intermediation_cpf
+  sale_intermediation_cnpj
+  quality_agent_ps
+}
+
+model User {
+  id           String  @id @default(uuid())
+  name         String
+  phone_number String  @db.VarChar(100)
+  email        String  @unique
+  password     String
+  cnpj         String? @unique
+  cpf          String? @unique
+  ccir         String? @unique
+  role         String
+  img          String?
+  valid        Boolean @default(true)
+
+  // Relacionamentos
+  questions         Question[]
+  addresses         Address[]
+  products          Product[]
+  securityQuestions SecurityQuestions?
+
+  // Vendas (comprador e vendedor)
+  salesBuyer SaleData[] @relation("BuyerSales")
+
+  sellerStats SellerStats?
+  Cart        Cart[]
+
+  acceptances ContractAcceptance[]
+}
+
+model Address {
+  id                     String  @id @default(uuid())
+  userId                 String
+  addressee              String
+  phone_number_addressee String
+  alias                  String
+  street                 String
+  number                 String
+  complement             String?
+  referencePoint         String?
+  cep                    String
+  uf                     String
+  city                   String
+  default                Boolean @default(false)
+
+  user          User       @relation(fields: [userId], references: [id])
+  salesShipping SaleData[] @relation("ShippingAddress")
+
+  @@map("Address")
+}
+
+model SecurityQuestions {
+  id       String @id @default(uuid())
+  userId   String @unique
+  answer_1 String
+  answer_2 String
+  answer_3 String
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Product {
+  id               String   @id @default(uuid())
+  sellerId         String
+  name             String
+  category         String
+  variety          String
+  stock            Int
+  description      String
+  images_Path      String[]
+  harvestAt        DateTime
+  productRating    Float
+  amountSold       Int
+  isNegotiable     Boolean
+  ratingAmount     Int
+  ratingStarAmount Float[]
+  createdAt        DateTime
+  status           Boolean  @default(true)
+
+  seller              User                 @relation(fields: [sellerId], references: [id])
+  sellingUnitsProduct SellingUnitProduct[]
+  boughtProducts      BoughtProduct[]
+  questions           Question[]
+  CartItem            CartItem[]
+}
+
+model SellerStats {
+  id             String @id @default(uuid())
+  sellerId       String @unique
+  sellerRating   Float
+  salesMade      Int
+  productsAmount Int
+
+  seller User @relation(fields: [sellerId], references: [id])
+}
+
+model PaymentMethod {
+  id     String @id @default(uuid())
+  method String
+
+  sales   SaleData[]
+  Payment Payment[]
+}
+
+model Payment {
+  id               String @id @default(uuid())
+  saleId           String
+  paymentMethodId  String
+  amount           Float
+  status           String
+  mp_preference_id String? // ID gerado pelo Mercado Pago (opcional)
+  mp_payment_id    String? // ID do pagamento real no Mercado Pago (opcional)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sale          SaleData      @relation(fields: [saleId], references: [id])
+  paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+}
+
+model TransportTypes {
+  id           String @id @default(uuid())
+  type         String
+  valueFreight Float  @default(0.0)
+
+  sales SaleData[]
+}
+
+model SaleData {
+  id               String    @id @default(uuid())
+  transportTypeId  String
+  createdAt        DateTime? @default(now())
+  shippedAt        DateTime?
+  arrivedAt        DateTime?
+  transportValue   Float
+  productRating    Float?    @default(0.0)
+  sellerRating     Float?    @default(0.0)
+  status           String    @default("Pedido realizado!")
+  addressId        String?
+  paymentMethodId  String
+  buyerId          String
+  paymentCompleted Boolean   @default(false)
+  sellerApproved   Boolean?  @map("seller_approved")
+
+  transportType      TransportTypes       @relation(fields: [transportTypeId], references: [id])
+  paymentMethod      PaymentMethod        @relation(fields: [paymentMethodId], references: [id])
+  buyer              User                 @relation("BuyerSales", fields: [buyerId], references: [id])
+  shippingAddress    Address?             @relation("ShippingAddress", fields: [addressId], references: [id])
+  boughtProducts     BoughtProduct[]
+  ContractAcceptance ContractAcceptance[]
+  Payment            Payment[]
+
+  cargoWeightKg Decimal? @map("cargo_weight_kg") @db.Decimal(10, 2)
+
+}
+
+model BoughtProduct {
+  id                   String @id @default(uuid())
+  productId            String
+  sellingUnitProductId String
+  value                Float
+  amount               Int
+  saleDataId           String
+
+  product            Product            @relation(fields: [productId], references: [id])
+  sellingUnitProduct SellingUnitProduct @relation(fields: [sellingUnitProductId], references: [id])
+  saleData           SaleData           @relation(fields: [saleDataId], references: [id])
+}
+
+model SellingUnit {
+  id    String @id @default(uuid())
+  unit  String
+  title String
+
+  sellingUnitsProduct SellingUnitProduct[]
+}
+
+model SellingUnitProduct {
+  id        String @id @default(uuid())
+  unitId    String
+  minPrice  Float
+  productId String
+
+  unit    SellingUnit @relation(fields: [unitId], references: [id])
+  product Product     @relation(fields: [productId], references: [id])
+
+  boughtProducts BoughtProduct[]
+  CartItem       CartItem[]
+}
+
+model Question {
+  id           String @id @default(uuid())
+  question     String
+  answer       String
+  productId    String
+  questionerId String
+
+  product    Product @relation(fields: [productId], references: [id])
+  questioner User    @relation(fields: [questionerId], references: [id])
+
+  @@map("Question")
+}
+
+model PriceRecommendation {
+  id               String   @id @default(uuid())
+  productName      String
+  productUnit      String?
+  productUnitKind  String?
+  productUnitKg    Decimal? @db.Decimal(10, 2)
+  pricePerKg       Decimal? @db.Decimal(10, 2)
+  marketPrice      Decimal  @db.Decimal(10, 2)
+  suggestedPrice   Decimal  @db.Decimal(10, 2)
+  date             DateTime
+  algorithmVersion String   @default("static-v1")
+  createdAt        DateTime @default(now())
+
+  @@unique([productName, date], name: "productName_date")
+  @@index([productName, date])
+  @@index([productUnitKind])
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  user      User       @relation(fields: [userId], references: [id])
+  userId    String
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id                   String             @id @default(uuid())
+  cart                 Cart               @relation(fields: [cartId], references: [id])
+  cartId               String
+  product              Product            @relation(fields: [productId], references: [id])
+  productId            String
+  sellingUnitProduct   SellingUnitProduct @relation(fields: [sellingUnitProductId], references: [id])
+  sellingUnitProductId String
+  amount               Int
+  value                Float
+}
+
+model Contract {
+  id          String               @id @default(uuid())
+  kind        ContractKind         @default(sale_tos)
+  version     String
+  content     String
+  sha256Hash  String               @map("sha256_hash")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  acceptances ContractAcceptance[]
+
+  @@unique([kind, version])
+  @@index([kind, createdAt])
+}
+
+model ContractAcceptance {
+  id         String   @id @default(uuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String   @map("user_id")
+  contract   Contract @relation(fields: [contractId], references: [id])
+  contractId String   @map("contract_id")
+
+  saleId String?        @map("sale_id")
+  sale   SaleData?      @relation(fields: [saleId], references: [id])
+  role   AcceptanceRole @default(BUYER)
+
+  accepted      Boolean
+  acceptedAt    DateTime @default(now()) @map("accepted_at")
+  clientIp      String   @map("client_ip")
+  userAgent     String   @map("user_agent")
+  signatureHash String   @map("signature_hash")
+
+  @@unique([userId, contractId, saleId, role])
+  @@index([saleId, role])
+}
