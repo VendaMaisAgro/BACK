@@ -30,9 +30,9 @@ export class PaymentService {
                         }
                     ],
                     back_urls: {
-                        success: 'https://www.vendamaisagro.com.br/sucesso',
-                        failure: 'https://www.vendamaisagro.com.br/erro',
-                        pending: 'https://www.vendamaisagro.com.br/pendente'
+                        success: 'https://www.vendamaisagro.com.br/payment/sucesso',
+                        failure: 'https://www.vendamaisagro.com.br/payment/erro',
+                        pending: 'https://www.vendamaisagro.com.br/payment/pendente'
                     },
                     auto_return: 'approved'
                 }
@@ -47,18 +47,6 @@ export class PaymentService {
                     mp_preference_id: response.id,
                 }
             });
-
-            console.log('Testando conexão simples...');
-            const testUser = await this.prisma.user.create({
-                data: {
-                    name: 'Teste',
-                    phone_number: '123456789',
-                    email: 'teste@test.com',
-                    password: 'hashedpassword',
-                    role: 'buyer',
-                },
-            });
-            console.log('Usuário teste criado:', testUser);
 
             return {
                 paymentId: payment.id,
