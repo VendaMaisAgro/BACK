@@ -164,6 +164,128 @@ router.get('/:id', controller.getById as RequestHandler);
 
 /**
  * @swagger
+ * /payment-methods/payments/{id}/sync:
+ *   post:
+ *     summary: Sincroniza o status de um pagamento com o Mercado Pago
+ *     description: Busca o status atual do pagamento no Mercado Pago e atualiza no banco de dados. Útil quando o webhook não chega ou para verificação manual.
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do pagamento no sistema
+ *         example: "d307cd23-bf88-4b0d-bd33-3c93ef5f8ba6"
+ *     responses:
+ *       200:
+ *         description: Status sincronizado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 updated:
+ *                   type: boolean
+ *                   example: true
+ *                 payment:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "d307cd23-bf88-4b0d-bd33-3c93ef5f8ba6"
+ *                     status:
+ *                       type: string
+ *                       example: "completed"
+ *                     mp_payment_id:
+ *                       type: string
+ *                       example: "1234567890"
+ *                     mp_status:
+ *                       type: string
+ *                       example: "approved"
+ *                 mercadopago:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "1234567890"
+ *                     status:
+ *                       type: string
+ *                       example: "approved"
+ *                     transaction_amount:
+ *                       type: number
+ *                       example: 100.00
+ *                     date_approved:
+ *                       type: string
+ *                       format: date-time
+ *       404:
+ *         description: Pagamento não encontrado ou não processado ainda
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Pagamento ainda não foi realizado ou processado pelo Mercado Pago"
+ *       400:
+ *         description: ID inválido
+ *       500:
+ *         description: Erro ao sincronizar status
+ */
+router.post('/:id/sync', controller.syncPaymentStatus as RequestHandler);
+
+/**
+ * @swagger
+ * /payment-methods/payments/{id}/debug:
+ *   get:
+ *     summary: Debug de um pagamento - informações detalhadas
+ *     description: Retorna informações completas do pagamento tanto no banco quanto no Mercado Pago para debug
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do pagamento no sistema
+ *         example: "d307cd23-bf88-4b0d-bd33-3c93ef5f8ba6"
+ *     responses:
+ *       200:
+ *         description: Informações de debug retornadas
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 paymentRecord:
+ *                   type: object
+ *                   description: Dados do pagamento no banco
+ *                 mpData:
+ *                   type: object
+ *                   description: Dados do pagamento no Mercado Pago
+ *                 canSync:
+ *                   type: boolean
+ *                   description: Se é possível sincronizar o pagamento
+ *       400:
+ *         description: ID inválido
+ *       500:
+ *         description: Erro ao buscar informações de debug
+ */
+router.get('/:id/debug', controller.debugPayment as RequestHandler);
+
+/**
+ * @swagger
  * /payment-methods/payments/{id}:
  *   patch:
  *     summary: Atualiza informações de um pagamento
@@ -227,5 +349,51 @@ router.get('/:id', controller.getById as RequestHandler);
  *                   type: string
  */
 router.patch('/:id', controller.updatePayment as RequestHandler);
+
+/**
+ * @swagger
+ * /payment-methods/webhook:
+ *   post:
+ *     summary: Endpoint para processar webhooks do Mercado Pago
+ *     description: Recebe notificações do Mercado Pago sobre mudanças no status dos pagamentos
+ *     tags: [PaymentMethods]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 example: "payment"
+ *               data:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                     example: "123456789"
+ *     responses:
+ *       200:
+ *         description: Webhook processado com sucesso
+ *         content:
+ *           text/plain:
+ *             schema:
+ *               type: string
+ *               example: "OK"
+ *       500:
+ *         description: Erro ao processar webhook
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Erro ao processar webhook."
+ *                 message:
+ *                   type: string
+ */
+router.post('/webhook', controller.processWebhook as RequestHandler);
 
 export default router;

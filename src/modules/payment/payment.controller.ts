@@ -78,4 +78,78 @@ export class PaymentController {
             });
         }
     };
+
+    public processWebhook: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const data = req.body;
+            await service.processWebhook(data);
+            res.status(200).send('OK');
+        } catch (error: any) {
+            console.error(error);
+            res.status(500).json({
+                error: 'Erro ao processar webhook.',
+                message: error.message,
+            });
+        }
+    };
+
+    /**
+     * Sincroniza o status de um pagamento com o Mercado Pago
+     * Útil para verificar status manualmente quando o webhook não chega
+     */
+    public syncPaymentStatus: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const paymentId = req.params.id;
+            if (!paymentId) {
+                res.status(400).json({ error: 'ID do pagamento é obrigatório.' });
+                return;
+            }
+
+            const result = await service.syncPaymentStatus(paymentId);
+
+            if (!result.success) {
+                res.status(404).json(result);
+                return;
+            }
+
+            res.json(result);
+        } catch (error: any) {
+            console.error('Erro ao sincronizar status do pagamento:', error);
+            res.status(500).json({
+                error: 'Erro ao sincronizar status do pagamento.',
+                message: error.message,
+            });
+        }
+    };
+
+    /**
+     * Debug de um pagamento - retorna informações detalhadas
+     */
+    public debugPayment: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const paymentId = req.params.id;
+            if (!paymentId) {
+                res.status(400).json({ error: 'ID do pagamento é obrigatório.' });
+                return;
+            }
+
+            const result = await service.debugPayment(paymentId);
+            res.json(result);
+        } catch (error: any) {
+            console.error('Erro ao debugar pagamento:', error);
+            res.status(500).json({
+                error: 'Erro ao debugar pagamento.',
+                message: error.message,
+            });
+        }
+    };
 }
