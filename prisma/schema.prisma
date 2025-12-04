@@ -106,7 +106,7 @@ model Product {
   status           Boolean  @default(true)
 
   seller              User                 @relation(fields: [sellerId], references: [id])
-  sellingUnitsProduct SellingUnitProduct[]
+  sellingUnitProduct SellingUnitProduct[]
   boughtProducts      BoughtProduct[]
   questions           Question[]
   CartItem            CartItem[]
@@ -199,7 +199,7 @@ model SellingUnit {
   unit  String
   title String
 
-  sellingUnitsProduct SellingUnitProduct[]
+  sellingUnitProduct SellingUnitProduct[]
 }
 
 model SellingUnitProduct {

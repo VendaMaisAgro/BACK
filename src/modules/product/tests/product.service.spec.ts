@@ -55,7 +55,7 @@ describe('ProductService', () => {
         ratingStarAmount: [],
         status: true, // Corrigido para boolean
         sellerId,
-        sellingUnitsProduct: [
+        sellingUnitProduct: [
           { unitId, minPrice: 15.5 }
         ],
       };
@@ -82,7 +82,7 @@ describe('ProductService', () => {
         ratingStarAmount: [],
         status: true,
         sellerId: 99999,
-        sellingUnitsProduct: [{ unitId, minPrice: 10 }],
+        sellingUnitProduct: [{ unitId, minPrice: 10 }],
       };
 
       await expect(service.create(data)).rejects.toThrow('Vendedor com ID 99999 não encontrado');

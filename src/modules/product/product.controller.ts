@@ -7,8 +7,8 @@ export class ProductController {
   async create(req: Request, res: Response) {
     try {
       // Parse de payloads que podem vir como string (FormData)
-      if (typeof req.body.sellingUnitsProduct === "string") {
-        req.body.sellingUnitsProduct = JSON.parse(req.body.sellingUnitsProduct);
+      if (typeof req.body.sellingUnitProduct === "string") {
+        req.body.sellingUnitProduct = JSON.parse(req.body.sellingUnitProduct);
       }
       if (typeof req.body.ratingStarAmount === "string") {
         req.body.ratingStarAmount = JSON.parse(req.body.ratingStarAmount);
@@ -85,8 +85,8 @@ export class ProductController {
       const id = req.params.id;
 
       // Parse de possíveis strings JSON vindas via FormData
-      if (typeof req.body.sellingUnitsProduct === "string") {
-        req.body.sellingUnitsProduct = JSON.parse(req.body.sellingUnitsProduct);
+      if (typeof req.body.sellingUnitProduct === "string") {
+        req.body.sellingUnitProduct = JSON.parse(req.body.sellingUnitProduct);
       }
       if (typeof req.body.ratingStarAmount === "string") {
         req.body.ratingStarAmount = JSON.parse(req.body.ratingStarAmount);

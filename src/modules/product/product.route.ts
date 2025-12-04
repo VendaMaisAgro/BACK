@@ -43,7 +43,7 @@ router.use(protectRoute as express.RequestHandler);
  *         - ratingAmount
  *         - ratingStarAmount
  *         - sellerId
- *         - sellingUnitsProduct
+ *         - sellingUnitProduct
  *       properties:
  *         name:
  *           type: string
@@ -90,7 +90,7 @@ router.use(protectRoute as express.RequestHandler);
  *         sellerId:
  *           type: integer
  *           example: 1
- *         sellingUnitsProduct:
+ *         sellingUnitProduct:
  *           type: array
  *           items:
  *             type: object
