@@ -34,7 +34,6 @@ export class SaleService {
             where: { id: boughtProduct.productId },
             select: { id: true, name: true, stock: true, status: true },
           });
-          console.log('product encontrado:', product);
           if (!product) throw new Error(`Produto (productId=${boughtProduct.productId}) não encontrado`);
           if (!product.status) throw new Error(`Produto "${product.name}" não está ativo`);
 
@@ -45,7 +44,6 @@ export class SaleService {
               product: { select: { id: true, name: true } }
             },
           });
-          console.log('sellingUnitProduct encontrado:', sellingUnitProduct);
 
           if (!sellingUnitProduct) {
             throw new Error(

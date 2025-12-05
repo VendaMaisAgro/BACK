@@ -40,10 +40,6 @@ export class ProductService {
         status: data.status !== undefined ? (data.status === true || data.status === "true") : true,
       };
 
-      console.log("Dados do produto a serem criados:", productData);
-      console.log("SellingUnitProduct recebido:", data.sellingUnitProduct);
-
-      // Cria o produto
       const product = await this.prisma.product.create({
         data: productData,
         include: {
@@ -51,11 +47,7 @@ export class ProductService {
         },
       });
 
-      console.log("Produto criado com ID:", product.id);
-
-      // Verifica se há unidades de venda para associar
       if (data.sellingUnitProduct && data.sellingUnitProduct.length > 0) {
-        // Validação dos dados
         const sellingUnitsData = data.sellingUnitProduct.map((unit: any) => {
           if (!unit.unitId) {
             throw new Error(`unitId é obrigatório para cada unidade de venda`);
@@ -71,15 +63,10 @@ export class ProductService {
           };
         });
 
-        console.log("Dados das unidades de venda a serem criados:", sellingUnitsData);
-
         await this.prisma.sellingUnitProduct.createMany({
           data: sellingUnitsData,
         });
 
-        console.log("Unidades de venda criadas com sucesso!");
-
-        // Busca o produto com as unidades incluídas
         const productWithUnits = await this.prisma.product.findUnique({
           where: { id: product.id },
           include: {

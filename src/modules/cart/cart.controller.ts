@@ -27,7 +27,6 @@ export class CartController {
         cleanedData.amount,
         cleanedData.value
       );
-      console.log("Item adicionado ao carrinho:", item);
       res.status(201).json(item);
     } catch (error) {
       console.error("Erro ao adicionar item ao carrinho:", error);
