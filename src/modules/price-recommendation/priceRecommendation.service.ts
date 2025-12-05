@@ -12,7 +12,7 @@ const parseDecimal = (v: string) =>
 
 const parseDateBRtoUS = (dmy: string) => {
   const [day, month, year] = dmy.split('/');
-  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`; // yyyy-mm-dd
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 };
 
 const dateBRToUTCDate = (dmy: string) => {
@@ -140,7 +140,7 @@ export class PriceRecommendationService {
         // regra simples: "KG" → Kind=Kg, Kg=1; "UNID." → Kind=Un, Kg=null
         const productUnitKind =
           /KG\b/.test(measureUpper) ? 'Kg' :
-          /UNID/.test(measureUpper) ? 'Un' : null;
+            /UNID/.test(measureUpper) ? 'Un' : null;
 
         const productUnitKg =
           productUnitKind === 'Kg' ? 1 : null;

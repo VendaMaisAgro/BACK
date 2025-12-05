@@ -1,4 +1,3 @@
-// src/modules/uploadS3/uploadS3.controller.ts
 import { Request, Response, RequestHandler } from "express";
 import { PrismaClient } from "@prisma/client";
 import { UploadS3Service } from "./uploadS3.service";

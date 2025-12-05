@@ -33,7 +33,6 @@ export class AddressService {
   }
 
   async updateAddress(addressId: string, data: any) {
-    // garantir que o endereço existe SEMPRE
     const existing = await prisma.address.findUnique({ where: { id: addressId } });
     if (!existing) throw new Error("Endereço não encontrado.");
 

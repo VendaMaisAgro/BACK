@@ -41,13 +41,11 @@ model User {
   img          String?
   valid        Boolean @default(true)
 
-  // Relacionamentos
   questions         Question[]
   addresses         Address[]
   products          Product[]
   securityQuestions SecurityQuestions?
 
-  // Vendas (comprador e vendedor)
   salesBuyer SaleData[] @relation("BuyerSales")
 
   sellerStats SellerStats?
@@ -106,7 +104,7 @@ model Product {
   status           Boolean  @default(true)
 
   seller              User                 @relation(fields: [sellerId], references: [id])
-  sellingUnitsProduct SellingUnitProduct[]
+  sellingUnitProduct SellingUnitProduct[]
   boughtProducts      BoughtProduct[]
   questions           Question[]
   CartItem            CartItem[]
@@ -136,8 +134,8 @@ model Payment {
   paymentMethodId  String
   amount           Float
   status           String
-  mp_preference_id String? // ID gerado pelo Mercado Pago (opcional)
-  mp_payment_id    String? // ID do pagamento real no Mercado Pago (opcional)
+  mp_preference_id String? 
+  mp_payment_id    String? 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -199,7 +197,7 @@ model SellingUnit {
   unit  String
   title String
 
-  sellingUnitsProduct SellingUnitProduct[]
+  sellingUnitProduct SellingUnitProduct[]
 }
 
 model SellingUnitProduct {

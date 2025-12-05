@@ -22,10 +22,8 @@ const options = {
         },
       },
     },
-    // Segurança global: todas as rotas exigem Bearer por padrão (pode ser sobrescrito por rota)
     security: [{ BearerAuth: [] }],
   },
-  // Aponta para todas as rotas com anotações @swagger
   apis: ['src/modules/**/*.ts'],
 };
 

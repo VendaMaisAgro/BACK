@@ -52,6 +52,18 @@ export class PaymentService {
                 }
             });
 
+            console.log('Testando conexão simples...');
+            const testUser = await this.prisma.user.create({
+                data: {
+                    name: 'Teste',
+                    phone_number: '123456789',
+                    email: 'teste@test.com',
+                    password: 'hashedpassword',
+                    role: 'buyer',
+                },
+            });
+            console.log('Usuário teste criado:', testUser);
+
             return {
                 paymentId: payment.id,
                 mp_preference_id: response.id,

@@ -10,7 +10,6 @@ export class UserController {
     try {
       let data = { ...req.body };
 
-      // Parse do securityQuestions se vier como string JSON
       if (typeof data.securityQuestions === 'string') {
         try {
           data.securityQuestions = JSON.parse(data.securityQuestions);
@@ -80,10 +79,8 @@ export class UserController {
 
   public deleteHandler: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
-      // Agora o ID é uma string UUID, não precisa converter
       const { id } = req.params;
 
-      // Validação básica de UUID (opcional)
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(id)) {
         res.status(400).json({ error: 'ID deve ser um UUID válido' });

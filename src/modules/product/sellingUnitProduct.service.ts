@@ -19,7 +19,6 @@ export class SellingUnitProductService {
 
   async create(data: CreateSellingUnitProductDto) {
     try {
-      // Validar se o produto existe
       const product = await prisma.product.findUnique({
         where: { id: data.productId },
       });
@@ -28,7 +27,6 @@ export class SellingUnitProductService {
         throw new Error(`Produto com ID ${data.productId} não encontrado`);
       }
 
-      // Validar se a unidade existe
       const unit = await prisma.sellingUnit.findUnique({
         where: { id: data.unitId },
       });
@@ -37,7 +35,6 @@ export class SellingUnitProductService {
         throw new Error(`Unidade de venda com ID ${data.unitId} não encontrada`);
       }
 
-      // Verificar se já existe essa combinação produto-unidade
       const existing = await prisma.sellingUnitProduct.findFirst({
         where: {
           productId: data.productId,
@@ -91,7 +88,6 @@ export class SellingUnitProductService {
   }
 
   async getByProductId(productId: string) {
-    // Validar se o produto existe
     const product = await prisma.product.findUnique({
       where: { id: productId },
     });
@@ -142,13 +138,11 @@ export class SellingUnitProductService {
 
   async update(id: string, data: UpdateSellingUnitProductDto) {
     try {
-      // Verificar se o registro existe
       const existing = await this.getById(id);
       if (!existing) {
         throw new Error(`Unidade de venda do produto com ID ${id} não encontrada`);
       }
 
-      // Se está alterando a unidade, validar se existe
       if (data.unitId && data.unitId !== existing.unitId) {
         const unit = await prisma.sellingUnit.findUnique({
           where: { id: data.unitId },
@@ -158,12 +152,11 @@ export class SellingUnitProductService {
           throw new Error(`Unidade de venda com ID ${data.unitId} não encontrada`);
         }
 
-        // Verificar se já existe essa combinação produto-unidade
         const duplicate = await prisma.sellingUnitProduct.findFirst({
           where: {
             productId: existing.productId,
             unitId: data.unitId,
-            id: { not: id }, // Excluir o próprio registro da verificação
+            id: { not: id },
           },
         });
 
@@ -197,7 +190,6 @@ export class SellingUnitProductService {
 
   async delete(id: string) {
     try {
-      // Verificar se o registro existe
       const existing = await prisma.sellingUnitProduct.findUnique({
         where: { id },
         include: {
@@ -210,7 +202,6 @@ export class SellingUnitProductService {
         throw new Error(`Unidade de venda do produto com ID ${id} não encontrada`);
       }
 
-      // Verificar se tem produtos comprados ou itens no carrinho relacionados
       if (existing.boughtProducts.length > 0) {
         throw new Error('Não é possível deletar esta unidade de venda pois existem produtos comprados relacionados');
       }
@@ -230,7 +221,6 @@ export class SellingUnitProductService {
 
   async deleteByProductId(productId: string) {
     try {
-      // Verificar se o produto existe
       const product = await prisma.product.findUnique({
         where: { id: productId },
       });
@@ -239,7 +229,6 @@ export class SellingUnitProductService {
         throw new Error(`Produto com ID ${productId} não encontrado`);
       }
 
-      // Buscar todas as unidades de venda do produto
       const sellingUnits = await prisma.sellingUnitProduct.findMany({
         where: { productId },
         include: {
@@ -248,14 +237,12 @@ export class SellingUnitProductService {
         },
       });
 
-      // Verificar se alguma tem relacionamentos que impedem a exclusão
       for (const unit of sellingUnits) {
         if (unit.boughtProducts.length > 0 || unit.CartItem.length > 0) {
           throw new Error(`Não é possível deletar as unidades de venda pois existem registros relacionados`);
         }
       }
 
-      // Deletar todas as unidades de venda do produto
       return await prisma.sellingUnitProduct.deleteMany({
         where: { productId },
       });

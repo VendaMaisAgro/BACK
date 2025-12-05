@@ -44,16 +44,24 @@ export class ProductService {
         data: productData,
         include: {
           seller: { select: { id: true, name: true, email: true } },
-          sellingUnitsProduct: true,
         },
       });
 
-      if (data.sellingUnitsProduct && data.sellingUnitsProduct.length > 0) {
-        const sellingUnitsData = data.sellingUnitsProduct.map((unit: any) => ({
-          productId: product.id,
-          unitId: unit.unitId,
-          minPrice: parseFloat(unit.minPrice),
-        }));
+      if (data.sellingUnitProduct && data.sellingUnitProduct.length > 0) {
+        const sellingUnitsData = data.sellingUnitProduct.map((unit: any) => {
+          if (!unit.unitId) {
+            throw new Error(`unitId é obrigatório para cada unidade de venda`);
+          }
+          if (!unit.minPrice && unit.minPrice !== 0) {
+            throw new Error(`minPrice é obrigatório para cada unidade de venda`);
+          }
+
+          return {
+            productId: product.id,
+            unitId: unit.unitId,
+            minPrice: parseFloat(unit.minPrice),
+          };
+        });
 
         await this.prisma.sellingUnitProduct.createMany({
           data: sellingUnitsData,
@@ -63,7 +71,7 @@ export class ProductService {
           where: { id: product.id },
           include: {
             seller: { select: { id: true, name: true, email: true } },
-            sellingUnitsProduct: { include: { unit: true } },
+            sellingUnitProduct: { include: { unit: true } },
           },
         });
 
@@ -85,7 +93,7 @@ export class ProductService {
     return this.prisma.product.findMany({
       where,
       include: {
-        sellingUnitsProduct: { include: { unit: true } },
+        sellingUnitProduct: { include: { unit: true } },
         boughtProducts: true,
         questions: true,
         seller: { select: { id: true, name: true, phone_number: true, email: true } },
@@ -101,7 +109,7 @@ export class ProductService {
     return this.prisma.product.findMany({
       where,
       include: {
-        sellingUnitsProduct: { include: { unit: true } },
+        sellingUnitProduct: { include: { unit: true } },
         boughtProducts: true,
         questions: true,
         seller: { select: { id: true, name: true, phone_number: true, email: true } },
@@ -113,7 +121,7 @@ export class ProductService {
     return this.prisma.product.findUnique({
       where: { id },
       include: {
-        sellingUnitsProduct: { include: { unit: true } },
+        sellingUnitProduct: { include: { unit: true } },
         boughtProducts: true,
         questions: true,
         seller: { select: { id: true, name: true, phone_number: true, email: true } },
@@ -132,13 +140,13 @@ export class ProductService {
         throw new Error("Produto não encontrado");
       }
 
-      const sellingUnitsToUpdate = data.sellingUnitsProduct;
+      const sellingUnitsToUpdate = data.sellingUnitProduct;
 
       let newImageUrls: string[] = [];
       if (files && files.length > 0) {
         const uploadPromises = files.map(async (file) => {
           const { publicUrl } = await this.uploadService.upload(file);
-          return publicUrl; // URL permanente
+          return publicUrl;
         });
         newImageUrls = await Promise.all(uploadPromises);
       }
@@ -205,7 +213,7 @@ export class ProductService {
         data: updateData,
         include: {
           seller: { select: { id: true, name: true, email: true } },
-          sellingUnitsProduct: true,
+          sellingUnitProduct: true,
         },
       });
 
@@ -243,7 +251,7 @@ export class ProductService {
           where: { id },
           include: {
             seller: { select: { id: true, name: true, email: true } },
-            sellingUnitsProduct: { include: { unit: true } },
+            sellingUnitProduct: { include: { unit: true } },
           },
         });
 

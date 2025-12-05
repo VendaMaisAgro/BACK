@@ -7,7 +7,6 @@ export class AddressController {
   async add(req: Request, res: Response) {
     try {
       const { userId } = req.params;
-      console.log("UserID:", userId);
       const address = await service.addAddress(userId, req.body);
       res.status(201).json(address);
     } catch (err: any) {
