@@ -1,4 +1,3 @@
-// src/modules/uploadS3/uploadS3.routes.ts
 import { Router } from "express";
 import multer from "multer";
 import { protectRoute } from '../../middlewares/auth.middleware';

@@ -146,7 +146,7 @@ export class ProductService {
       if (files && files.length > 0) {
         const uploadPromises = files.map(async (file) => {
           const { publicUrl } = await this.uploadService.upload(file);
-          return publicUrl; // URL permanente
+          return publicUrl;
         });
         newImageUrls = await Promise.all(uploadPromises);
       }

@@ -18,7 +18,7 @@ export const normSpaces = (s: string) => s.replace(/\s+/g, ' ').trim();
 export function stripLocationSuffix(s: string) {
   return s
     .replace(/\bJUAZEIRO\s*\(BA\)\b/gi, ' ')
-    .replace(/\(\s*[A-Z]{2}\s*\)\s*$/g, ' ') // “(BA)” etc no final
+    .replace(/\(\s*[A-Z]{2}\s*\)\s*$/g, ' ')
     .replace(/\bJUAZEIRO\b\s*$/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -26,7 +26,7 @@ export function stripLocationSuffix(s: string) {
 
 function normalizeUnit(u: string) {
   return u
-    .replace(/(\d)\s*(kg|g|l|lt)\b/gi, '$1 $2') // 10KG -> 10 Kg
+    .replace(/(\d)\s*(kg|g|l|lt)\b/gi, '$1 $2')
     .replace(/\bcx\b/gi, 'Cx')
     .replace(/\bsc\b/gi, 'Sc')
     .replace(/\bkg\b/gi, 'Kg')
@@ -52,13 +52,10 @@ export function cleanProductName(raw: string): string {
   if (!raw) return '';
   let s = normSpaces(raw);
 
-  // remove parênteses e o que estiver dentro
   s = s.replace(/\([^)]*\)/g, ' ');
 
-  // remove números isolados (ex: "1ª", "2", "11", "13 E")
   s = s.replace(/\b\d+[ºª]?\b/g, ' ');
 
-  // remove pontuações e conectores visuais
   s = s
     .replace(/[|:–—\-]/g, ' ')
     .replace(/^[\-–—]\s*/, '')
@@ -66,20 +63,15 @@ export function cleanProductName(raw: string): string {
     .replace(/[ºª°]/g, ' ')
     .trim();
 
-  // remove stopwords isoladas
   const rxStops = new RegExp(`\\b(?:${STOPWORDS.join('|')})\\b`, 'gi');
   s = s.replace(rxStops, ' ');
 
-  // remove prefixos tipo "PRODUTO:", "TIPO:" etc
   s = s.replace(/^(?:\w+\s*){0,2}:\s*/i, '');
 
-  // remove possíveis duplas de espaços
   s = s.replace(/\s{2,}/g, ' ').trim();
 
-  // remove resquícios de caracteres especiais
   s = s.replace(/[^\p{L}\s]/gu, ' ');
 
-  // normaliza espaços novamente
   return normSpaces(s);
 }
 
@@ -99,7 +91,6 @@ export function splitAgrolinkProduct(raw: string): SplitResult {
     if (RX.numWithSuffix.test(t)) { unitTokens.unshift(t); continue; }
     if (RX.unitWord.test(t) || RX.number.test(t)) { unitTokens.unshift(t); continue; }
 
-    // par "CX 10KG"
     if (i >= 1 && RX.unitWord.test(tokens[i - 1]) && RX.numWithSuffix.test(t)) {
       unitTokens.unshift(tokens[i - 1], t);
       i--;
@@ -119,13 +110,11 @@ export function parseUnitDetails(unit: string | null): UnitDetails {
   if (!unit) return { unitKind: null, unitKg: null, packCount: null };
   const s = normSpaces(unit);
 
-  // "12 Cx 13 Kg" | "Cx 20 Kg" | "15 Kg"
   let m = s.match(/^(?:(\d+(?:[.,]\d+)?)\s+)?(Cx|Sc|Kg|Mo-\d{1,2}|Lt|L|Un|Unid)\s*(\d+(?:[.,]\d+)?)?\s*Kg?$/i);
   if (m) {
     const packCount = m[1] ? parseFloat(m[1].replace(',', '.')) : null;
     const kindRaw = m[2];
     const unitKind = kindRaw.charAt(0).toUpperCase() + kindRaw.slice(1).toLowerCase();
-    // caso “15 Kg” vira packCount=15, kind=Kg, sem grupo 3 → tratamos como Kg=15
     if (/^Kg$/i.test(unitKind) && packCount && !m[3]) {
       return { unitKind: 'Kg', unitKg: packCount, packCount: null };
     }
@@ -133,13 +122,11 @@ export function parseUnitDetails(unit: string | null): UnitDetails {
     return { unitKind, unitKg: kg ?? null, packCount };
   }
 
-  // "1 Kg"
   m = s.match(/^(\d+(?:[.,]\d+)?)\s*Kg$/i);
   if (m) {
     return { unitKind: 'Kg', unitKg: parseFloat(m[1].replace(',', '.')), packCount: null };
   }
 
-  // "Kg"
   if (/^Kg$/i.test(s)) return { unitKind: 'Kg', unitKg: 1, packCount: null };
 
   return { unitKind: null, unitKg: null, packCount: null };

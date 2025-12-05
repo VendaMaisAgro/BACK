@@ -6,10 +6,10 @@ export interface CreateSaleDataDto {
   transportValue: number;
   cargoWeightKg?: number;
   productRating?: number;
-  sellerApproved?: boolean | null; // true=aceito, false=recusado, null=pendente
+  sellerApproved?: boolean | null;
   sellerRating?: number;
   status?: string;
-  addressId: string | null; // aceita null (retirada)
+  addressId: string | null;
   paymentMethodId: string;
   buyerId: string;
   paymentCompleted?: boolean;
@@ -30,7 +30,7 @@ export interface UpdateSaleDataDto {
   cargoWeightKg?: number;
   productRating?: number;
   sellerRating?: number;
-  sellerApproved?: boolean | null; // true/false/null
+  sellerApproved?: boolean | null;
   status?: string;
   addressId?: string | null;
   paymentMethodId?: string;

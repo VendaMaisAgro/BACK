@@ -6,7 +6,6 @@ const service = new ProductService();
 export class ProductController {
   async create(req: Request, res: Response) {
     try {
-      // Parse de payloads que podem vir como string (FormData)
       if (typeof req.body.sellingUnitProduct === "string") {
         req.body.sellingUnitProduct = JSON.parse(req.body.sellingUnitProduct);
       }
@@ -14,7 +13,6 @@ export class ProductController {
         req.body.ratingStarAmount = JSON.parse(req.body.ratingStarAmount);
       }
 
-      // Coerção de tipos simples
       if (req.body.stock !== undefined) req.body.stock = parseInt(req.body.stock);
       if (req.body.productRating !== undefined) req.body.productRating = parseFloat(req.body.productRating);
       if (req.body.amountSold !== undefined) req.body.amountSold = parseInt(req.body.amountSold);
@@ -84,14 +82,13 @@ export class ProductController {
     try {
       const id = req.params.id;
 
-      // Parse de possíveis strings JSON vindas via FormData
       if (typeof req.body.sellingUnitProduct === "string") {
         req.body.sellingUnitProduct = JSON.parse(req.body.sellingUnitProduct);
       }
       if (typeof req.body.ratingStarAmount === "string") {
         req.body.ratingStarAmount = JSON.parse(req.body.ratingStarAmount);
       }
-      // NOVO: aceitar lista de imagens que o FE quer manter
+
       if (typeof req.body.existingImages === "string") {
         try {
           req.body.existingImages = JSON.parse(req.body.existingImages);
@@ -118,7 +115,7 @@ export class ProductController {
 
   async delete(req: Request, res: Response) {
     try {
-      const id = req.params.id; // id é UUID (String) no schema
+      const id = req.params.id;
       await service.delete(id);
       res.status(204).send();
     } catch (error: any) {

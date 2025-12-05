@@ -7,12 +7,11 @@ const router = express.Router();
 const controller = new ProductController();
 
 const upload = multer({
-  storage: multer.memoryStorage(), // IMPORTANTE: Armazena na memória para enviar ao S3
+  storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // Limite de 10MB por arquivo
+    fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
-    // Aceitar apenas imagens
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
