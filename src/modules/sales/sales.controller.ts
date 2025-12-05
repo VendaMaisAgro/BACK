@@ -127,7 +127,7 @@ export class SaleController {
   };
 
   public calculateFreight: RequestHandler = async (req: Request, res: Response): Promise<void> => {
-    const id = req.params.id; // UUID como string
+    const id = req.params.id;
     const { distanceKm, pricePerKm } = req.body;
 
     if (!id || typeof distanceKm !== "number" || typeof pricePerKm !== "number") {
@@ -147,7 +147,7 @@ export class SaleController {
   public setSellerDecision: RequestHandler = async (req, res) => {
     try {
       const id = req.params.id;
-      const { approved } = req.body; // boolean
+      const { approved } = req.body;
 
       if (typeof approved !== "boolean") {
         res.status(400).json({ error: "Campo 'approved' deve ser boolean." });

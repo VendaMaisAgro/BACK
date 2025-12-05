@@ -179,7 +179,6 @@ export class ContractService {
   }
 
 
-  /** Sellers (ids) participantes da venda, derivados dos itens */
   async getSellersForSale(saleId: string): Promise<string[]> {
     const sale = await prisma.saleData.findUnique({
       where: { id: saleId },
@@ -191,13 +190,11 @@ export class ContractService {
       const sid = bp.product?.sellerId;
       if (typeof sid === 'string') ids.add(sid);
     }
-    // compat: se existir sale.sellerId (modelo leg antigo), inclui também
     const legacySellerId = (sale as any).sellerId;
     if (typeof legacySellerId === 'string') ids.add(legacySellerId);
     return [...ids];
   }
 
-  /** Monta contexto da venda para um seller específico (ou único seller) */
   private async getSaleContext(saleId: string, preferSellerId?: string) {
     const sale = await prisma.saleData.findUnique({
       where: { id: saleId },
@@ -214,15 +211,13 @@ export class ContractService {
 
     if (!sale) return null;
 
-    // descobre os sellers a partir dos itens
     const sellers = await this.getSellersForSale(saleId);
-    let sellerId = preferSellerId ?? (sale as any).sellerId; // compat
+    let sellerId = preferSellerId ?? (sale as any).sellerId;
     if (!sellerId) {
       if (sellers.length === 1) sellerId = sellers[0];
       else if (sellers.length > 1) throw new Error('MULTIPLE_SELLERS_REQUIRE_ID');
     }
 
-    // filtra itens do seller (se houver sellerId definido)
     const itemsAll = sale.boughtProducts;
     const itemsFiltered = sellerId
       ? itemsAll.filter(bp => bp.product?.sellerId === sellerId)
@@ -280,7 +275,7 @@ export class ContractService {
       'items.list': items
         .map(it => `- ${it.productName} x ${it.amount} ${it.unitTitle || it.unit || ''} = ${it.total.toFixed(2)}`)
         .join('\n'),
-      meta: { sellers }, // lista completa para decisões no controller
+      meta: { sellers },
     };
   }
 
@@ -298,7 +293,6 @@ export class ContractService {
     });
   }
 
-  /** Contrato resolvido (JSON) — pode exigir sellerId em vendas com múltiplos sellers */
   async getResolvedContractForSale(saleId: string, kind?: ContractKind, sellerId?: string) {
     const [ctx, kindToUse] = await Promise.all([
       this.getSaleContext(saleId, sellerId),
@@ -326,11 +320,10 @@ export class ContractService {
         totals: (ctx as any).totals,
         sellersInSale: (ctx as any).meta?.sellers ?? [],
       },
-      sellersInSale: (ctx as any).meta?.sellers ?? [], // também no topo para bater com o Swagger
+      sellersInSale: (ctx as any).meta?.sellers ?? [],
     };
   }
 
-  /** PDF do contrato resolvido por venda (pode exigir sellerId) */
   async generateContractForSalePDF(saleId: string, kind?: ContractKind, sellerId?: string): Promise<PDFKit.PDFDocument> {
     const doc = new PDFDocument({ size: 'A4', margin: 56, bufferPages: true });
 
@@ -397,7 +390,6 @@ export class ContractService {
     }
   }
 
-  /** PDF genérico do contrato (sem venda) — inalterado */
   async generateContract(kind?: ContractKind): Promise<PDFKit.PDFDocument> {
     const doc = new PDFDocument({ size: 'A4', margin: 56, bufferPages: true });
     const latest = await this.getLatestContract(kind);
@@ -462,11 +454,9 @@ export class ContractService {
     return doc;
   }
 
-  /** Status de aceites por venda (multi-seller) */
   async getAcceptanceStatusBySale(saleId: string) {
     const sellers = await this.getSellersForSale(saleId);
     if (!sellers.length) {
-      // pode ser venda inexistente ou sem itens
       const sale = await prisma.saleData.findUnique({ where: { id: saleId } });
       if (!sale) return null;
     }

@@ -42,7 +42,6 @@ describe('AddressService', () => {
   describe('addAddress', () => {
     it('deve criar um endereço para usuário existente', async () => {
       prismaMock.user.findUnique.mockResolvedValue(mockUser);
-      // primeiro endereço do usuário vira default = true
       prismaMock.address.count.mockResolvedValue(0);
       prismaMock.address.updateMany.mockResolvedValue({ count: 0 });
       prismaMock.address.create.mockResolvedValue({ ...mockAddress, default: true });

@@ -18,7 +18,7 @@ export class CartController {
 
   async addToCart(req: Request, res: Response): Promise<void> {
     try {
-      const { id, ...cleanedData }: any = req.body; // descarta `id` caso venha
+      const { id, ...cleanedData }: any = req.body;
 
       const item = await cartService.addToCart(
         cleanedData.userId,
@@ -27,7 +27,6 @@ export class CartController {
         cleanedData.amount,
         cleanedData.value
       );
-      console.log("Item adicionado ao carrinho:", item);
       res.status(201).json(item);
     } catch (error) {
       console.error("Erro ao adicionar item ao carrinho:", error);

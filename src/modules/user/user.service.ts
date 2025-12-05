@@ -18,7 +18,6 @@ export class UserService {
   public async create(data: any, file?: Express.Multer.File): Promise<User> {
     const { name, phone_number, email, password, role, cpf, cnpj, ccir, securityQuestions } = data;
 
-    // Validações básicas
     if (!name || !phone_number || !email || !password || !role) {
       throw new Error("Campos obrigatórios faltando.");
     }
@@ -27,7 +26,6 @@ export class UserService {
       throw new Error("CPF ou CNPJ é obrigatório.");
     }
 
-    // Validação de senha
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
     if (!passwordRegex.test(password)) {
       throw new Error(
@@ -35,7 +33,6 @@ export class UserService {
       );
     }
 
-    // Validação e verificação de CPF
     if (cpf) {
       if (!isCPF(cpf)) {
         throw new Error("CPF inválido.");
@@ -49,7 +46,6 @@ export class UserService {
       }
     }
 
-    // Validação e verificação de CNPJ
     if (cnpj) {
       if (!isCNPJ(cnpj)) {
         throw new Error("CNPJ inválido.");
@@ -63,7 +59,6 @@ export class UserService {
       }
     }
 
-    // Verificar se email já existe
     const existingEmail = await this.prisma.user.findUnique({
       where: { email }
     });
@@ -71,17 +66,14 @@ export class UserService {
       throw new Error("Email já cadastrado.");
     }
 
-    // Hash da senha
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Upload de imagem com URL permanente
     let imageUrl: string | null = null;
     if (file) {
       const { publicUrl } = await this.uploadService.upload(file);
       imageUrl = publicUrl;
     }
 
-    // Preparar perguntas de segurança
     const securityQuestionsData = securityQuestions
       ? {
         create: {
@@ -151,7 +143,6 @@ export class UserService {
     data: Partial<User>,
     file?: Express.Multer.File
   ): Promise<User> {
-    // Buscar usuário existente
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: { id: true, email: true, cpf: true, cnpj: true, img: true }
@@ -161,10 +152,8 @@ export class UserService {
       throw new Error("Usuário não encontrado.");
     }
 
-    // Preparar dados de atualização
     const updateData: any = { ...data };
 
-    // Validação e hash de nova senha
     if (data.password) {
       const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
       if (!passwordRegex.test(data.password)) {
@@ -173,7 +162,6 @@ export class UserService {
       updateData.password = await bcrypt.hash(data.password, 10);
     }
 
-    // Validação de CPF se estiver sendo atualizado
     if (data.cpf && data.cpf !== user.cpf) {
       if (!isCPF(data.cpf)) {
         throw new Error("CPF inválido.");
@@ -188,7 +176,6 @@ export class UserService {
       updateData.cpf = formattedCpf;
     }
 
-    // Validação de CNPJ se estiver sendo atualizado
     if (data.cnpj && data.cnpj !== user.cnpj) {
       if (!isCNPJ(data.cnpj)) {
         throw new Error("CNPJ inválido.");
@@ -203,7 +190,6 @@ export class UserService {
       updateData.cnpj = formattedCnpj;
     }
 
-    // Validação de email se estiver sendo atualizado
     if (data.email && data.email !== user.email) {
       const existingEmail = await this.prisma.user.findUnique({
         where: { email: data.email }
@@ -213,9 +199,7 @@ export class UserService {
       }
     }
 
-    // Upload de nova imagem com URL permanente
     if (file) {
-      // Deletar imagem antiga do S3 se existir
       if (user.img) {
         try {
           const oldKey = this.extractKeyFromUrl(user.img);
@@ -224,11 +208,9 @@ export class UserService {
           }
         } catch (error) {
           console.warn("Erro ao deletar imagem antiga:", error);
-          // Continua mesmo se falhar - não bloqueia a atualização
         }
       }
 
-      // Upload da nova imagem
       const { publicUrl } = await this.uploadService.upload(file);
       updateData.img = publicUrl;
     }
@@ -242,7 +224,6 @@ export class UserService {
         },
       });
 
-      // Remover senha do retorno por segurança
       const { password: _, ...userWithoutPassword } = updatedUser;
       return userWithoutPassword as unknown as User;
     } catch (error) {
@@ -253,9 +234,7 @@ export class UserService {
 
   private extractKeyFromUrl(url: string): string | null {
     try {
-      // Para URLs no formato: https://bucket.s3.region.amazonaws.com/key
       const urlObj = new URL(url);
-      // Remove a barra inicial do pathname
       return decodeURIComponent(urlObj.pathname.substring(1));
     } catch (error) {
       console.warn("Erro ao extrair key da URL:", url, error);
@@ -276,7 +255,6 @@ export class UserService {
       throw new Error("Usuário não encontrado.");
     }
 
-    // Deletar imagem antiga
     if (user.img) {
       try {
         const oldKey = this.extractKeyFromUrl(user.img);
@@ -288,10 +266,8 @@ export class UserService {
       }
     }
 
-    // Upload da nova imagem
     const { publicUrl } = await this.uploadService.upload(file);
 
-    // Atualizar no banco
     await this.prisma.user.update({
       where: { id: userId },
       data: { img: publicUrl },

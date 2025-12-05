@@ -48,7 +48,6 @@ export class ContractController {
     res.status(201).json(created);
   }
 
-  /** Aceite genérico (com ou sem venda) — userId vem do token */
   async accept(req: Request, res: Response) {
     try {
       const authUserId = req.user?.userId as string | undefined;
@@ -68,7 +67,6 @@ export class ContractController {
         return res.status(400).json({ message: 'Parâmetros inválidos' });
       }
 
-      // validação de vínculo com a venda quando saleId vier preenchido
       if (saleId) {
         if (role === AcceptanceRole.BUYER) {
           const buyerId = await service.getBuyerIdForSale(saleId);
@@ -128,7 +126,6 @@ export class ContractController {
     res.json(s);
   }
 
-  /** BUYER — userId vem do token */
   async buyerAccept(req: Request, res: Response) {
     try {
       const saleId = String(req.params.saleId);
@@ -143,7 +140,6 @@ export class ContractController {
         return res.status(400).json({ message: 'Parâmetros inválidos' });
       }
 
-      // garantir que o token seja do comprador dessa venda
       const buyerId = await service.getBuyerIdForSale(saleId);
       if (!buyerId) return res.status(404).json({ message: 'Venda não encontrada' });
       if (buyerId !== authUserId) {
@@ -195,7 +191,6 @@ export class ContractController {
     }
   }
 
-  /** SELLER — userId vem do token */
   async sellerAccept(req: Request, res: Response) {
     try {
       const saleId = String(req.params.saleId);
@@ -210,7 +205,6 @@ export class ContractController {
         return res.status(400).json({ message: 'Parâmetros inválidos' });
       }
 
-      // valida se o usuário (do token) é um seller participante da venda
       const sellers = await service.getSellersForSale(saleId);
       if (!sellers.includes(authUserId)) {
         return res.status(403).json({ message: 'Usuário não é vendedor desta venda' });
@@ -262,15 +256,12 @@ export class ContractController {
     }
   }
 
-  // ===== NOVOS ENDPOINTS (multi-seller) =====
-
-  /** GET /sales/:saleId/contract?sellerId=... */
   async contractBySale(req: Request, res: Response) {
     try {
       const saleId = String(req.params.saleId);
       if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
 
-      const kind = parseKind(req.query.kind); // undefined → serviço decide por CPF/CNPJ
+      const kind = parseKind(req.query.kind);
       const sellerId = parseId(req.query.sellerId);
 
       const resolved = await service.getResolvedContractForSale(saleId, kind, sellerId?.toString());
@@ -290,13 +281,12 @@ export class ContractController {
     }
   }
 
-  /** GET /sales/:saleId/contract/pdf?sellerId=... */
   async contractPdfBySale(req: Request, res: Response) {
     try {
       const saleId = String(req.params.saleId);
       if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
 
-      const kind = parseKind(req.query.kind); // undefined → serviço decide por CPF/CNPJ
+      const kind = parseKind(req.query.kind);
       const sellerId = parseId(req.query.sellerId);
 
       const doc = await service.generateContractForSalePDF(saleId, kind, sellerId?.toString());

@@ -1,5 +1,3 @@
-// dto/cart.dto.ts
-
 export interface AddToCartDto {
   userId: string;
   productId: string;
