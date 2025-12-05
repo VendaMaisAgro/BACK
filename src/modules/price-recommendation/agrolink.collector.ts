@@ -5,11 +5,11 @@ import { splitAgrolinkProduct } from './agrolinkName';
 
 export type AgrolinkItem = {
   produto: string;
-  name: string;        // apenas o nome
-  unit: string | null; // unidade normalizada (ex.: "Cx 10 Kg") ou null
+  name: string;
+  unit: string | null;
   local: string;
-  preco: string;       // "62,80"
-  data: string;        // "dd/mm/yyyy"
+  preco: string;
+  data: string;
 };
 
 const URL_DEFAULT = 'https://www.agrolink.com.br/regional/ba/juazeiro/cotacoes';
@@ -19,7 +19,7 @@ const URL_DEFAULT = 'https://www.agrolink.com.br/regional/ba/juazeiro/cotacoes';
 function normalizePreco(raw: string): string {
   let cleaned = raw.replace(/[^\d.,]/g, '');
   if (!cleaned) return '';
-  if (/[.,]/.test(cleaned)) return cleaned.replace('.', ','); // 62.80 -> 62,80
+  if (/[.,]/.test(cleaned)) return cleaned.replace('.', ',');
   if (/^\d{3,}$/.test(cleaned)) {
     const intPart = cleaned.slice(0, -2);
     const decimal = cleaned.slice(-2);
