@@ -42,12 +42,12 @@ async function checkSalesData() {
 
     // Verificar produtos
     const products = await prisma.product.findMany({
-      select: { id: true, name: true, sellingUnitsProduct: true },
+      select: { id: true, name: true, sellingUnitProduct: true },
       take: 3
     });
     console.log('\nProdutos disponíveis:');
     products.forEach(product => {
-      console.log(`  ID: ${product.id}, Nome: ${product.name}, Preço: R$ ${product.sellingUnitsProduct}`);
+      console.log(`  ID: ${product.id}, Nome: ${product.name}, Preço: R$ ${product.sellingUnitProduct}`);
     });
 
     // Verificar unidades de venda dos produtos

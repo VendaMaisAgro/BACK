@@ -34,7 +34,7 @@ export const normSpaces = (s: string) => s.replace(/\s+/g, ' ').trim();
 export function stripLocationSuffix(s: string) {
   return s
     .replace(/\bJUAZEIRO\s*\(BA\)\b/gi, ' ')
-    .replace(/\(\s*[A-Z]{2}\s*\)\s*$/g, ' ') // “(BA)” etc no final
+    .replace(/\(\s*[A-Z]{2}\s*\)\s*$/g, ' ')
     .replace(/\bJUAZEIRO\b\s*$/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -259,7 +259,6 @@ export function parseUnitDetails(unit: string | null): UnitDetails {
     return { unitKind, unitKg: kg ?? null, packCount };
   }
 
-  // "1 Kg"
   m = s.match(/^(\d+(?:[.,]\d+)?)\s*Kg$/i);
   if (m) {
     return {
@@ -269,7 +268,6 @@ export function parseUnitDetails(unit: string | null): UnitDetails {
     };
   }
 
-  // "Kg"
   if (/^Kg$/i.test(s)) return { unitKind: 'Kg', unitKg: 1, packCount: null };
 
   return { unitKind: null, unitKg: null, packCount: null };

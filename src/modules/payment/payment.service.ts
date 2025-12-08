@@ -48,7 +48,6 @@ export class PaymentService {
                 }
             });
 
-            console.log('Testando conexão simples...');
             const testUser = await this.prisma.user.create({
                 data: {
                     name: 'Teste',
@@ -58,7 +57,6 @@ export class PaymentService {
                     role: 'buyer',
                 },
             });
-            console.log('Usuário teste criado:', testUser);
 
             return {
                 paymentId: payment.id,

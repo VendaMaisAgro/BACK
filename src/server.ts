@@ -1,6 +1,6 @@
 import app from './app';
 import { PrismaClient } from '@prisma/client';
-import './modules/price-recommendation/syncPricesJob';  // << inicia o cron
+import './modules/price-recommendation/syncPricesJob';
 
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 5000;

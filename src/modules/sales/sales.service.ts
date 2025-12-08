@@ -13,7 +13,6 @@ export class SaleService {
       const buyer = await this.prisma.user.findUnique({ where: { id: data.buyerId } });
       if (!buyer) throw new Error(`Usuário comprador (buyerId=${data.buyerId}) não encontrado`);
 
-      // addressId agora é opcional: só valida se veio
       if (data.addressId) {
         const address = await this.prisma.address.findUnique({ where: { id: data.addressId } });
         if (!address) throw new Error(`Endereço (addressId=${data.addressId}) não encontrado`);
@@ -40,18 +39,28 @@ export class SaleService {
 
           const sellingUnitProduct = await this.prisma.sellingUnitProduct.findUnique({
             where: { id: boughtProduct.sellingUnitProductId },
-            include: { unit: { select: { unit: true, title: true } }, product: { select: { id: true, name: true } } },
+            include: {
+              unit: { select: { unit: true, title: true } },
+              product: { select: { id: true, name: true } }
+            },
           });
-          if (!sellingUnitProduct)
-            throw new Error(`Unidade de venda (sellingUnitProductId=${boughtProduct.sellingUnitProductId}) não encontrada`);
+
+          if (!sellingUnitProduct) {
+            throw new Error(
+              `Unidade de venda (sellingUnitProductId=${boughtProduct.sellingUnitProductId}) não encontrada`
+            );
+          }
+
           if (sellingUnitProduct.productId !== boughtProduct.productId) {
-            throw new Error(`A unidade de venda ${boughtProduct.sellingUnitProductId} não pertence ao produto ${boughtProduct.productId}`);
+            throw new Error(
+              `A unidade de venda ${boughtProduct.sellingUnitProductId} não pertence ao produto ${boughtProduct.productId}`
+            );
           }
 
           const calculatedValue = sellingUnitProduct.minPrice * boughtProduct.amount;
           return {
             productId: boughtProduct.productId,
-            sellingUnitProductId: boughtProduct.sellingUnitProductId,
+            sellingUnitProductId: sellingUnitProduct.id,
             value: calculatedValue,
             amount: boughtProduct.amount,
           };
@@ -69,7 +78,7 @@ export class SaleService {
           productRating: data.productRating ?? 0,
           sellerRating: data.sellerRating ?? 0,
           status: data.status ?? "Pedido realizado!",
-          sellerApproved: data.sellerApproved ?? null, // novo campo
+          sellerApproved: data.sellerApproved ?? null,
           addressId: data.addressId ?? null,
           paymentMethodId: data.paymentMethodId,
           buyerId: data.buyerId,
@@ -162,16 +171,16 @@ export class SaleService {
         })),
         shippingAddress: sale.shippingAddress
           ? {
-              id: sale.shippingAddress.id,
-              addressee: sale.shippingAddress.addressee,
-              phone_number_addressee: sale.shippingAddress.phone_number_addressee,
-              street: sale.shippingAddress.street,
-              number: sale.shippingAddress.number,
-              complement: sale.shippingAddress.complement,
-              city: sale.shippingAddress.city,
-              uf: sale.shippingAddress.uf,
-              cep: sale.shippingAddress.cep,
-            }
+            id: sale.shippingAddress.id,
+            addressee: sale.shippingAddress.addressee,
+            phone_number_addressee: sale.shippingAddress.phone_number_addressee,
+            street: sale.shippingAddress.street,
+            number: sale.shippingAddress.number,
+            complement: sale.shippingAddress.complement,
+            city: sale.shippingAddress.city,
+            uf: sale.shippingAddress.uf,
+            cep: sale.shippingAddress.cep,
+          }
           : null,
         paymentMethod: sale.paymentMethod ? { id: sale.paymentMethod.id, method: sale.paymentMethod.method } : null,
         transportType: sale.transportType
@@ -247,16 +256,16 @@ export class SaleService {
         })),
         shippingAddress: purchase.shippingAddress
           ? {
-              id: purchase.shippingAddress.id,
-              addressee: purchase.shippingAddress.addressee,
-              phone_number_addressee: purchase.shippingAddress.phone_number_addressee,
-              street: purchase.shippingAddress.street,
-              number: purchase.shippingAddress.number,
-              complement: purchase.shippingAddress.complement,
-              city: purchase.shippingAddress.city,
-              uf: purchase.shippingAddress.uf,
-              cep: purchase.shippingAddress.cep,
-            }
+            id: purchase.shippingAddress.id,
+            addressee: purchase.shippingAddress.addressee,
+            phone_number_addressee: purchase.shippingAddress.phone_number_addressee,
+            street: purchase.shippingAddress.street,
+            number: purchase.shippingAddress.number,
+            complement: purchase.shippingAddress.complement,
+            city: purchase.shippingAddress.city,
+            uf: purchase.shippingAddress.uf,
+            cep: purchase.shippingAddress.cep,
+          }
           : null,
         paymentMethod: purchase.paymentMethod ? { id: purchase.paymentMethod.id, method: purchase.paymentMethod.method } : null,
         transportType: purchase.transportType

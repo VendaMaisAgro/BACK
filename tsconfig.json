@@ -8,11 +8,13 @@
       "esModuleInterop": true,
       "skipLibCheck": true,
       "moduleResolution": "node",
+      "forceConsistentCasingInFileNames": true,
       "typeRoots": ["./node_modules/@types", "./src/@types"],
       "types": ["jest","express"],
       "experimentalDecorators": true,
       "emitDecoratorMetadata": true,
-      "baseUrl": "./"
+      "baseUrl": "./",
+      "noImplicitAny": false
     },
     "include": ["src/**/*","**/*.spec.ts" ],
     "exclude": [
