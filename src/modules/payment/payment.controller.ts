@@ -78,4 +78,69 @@ export class PaymentController {
             });
         }
     };
+
+    public processWebhook: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const result = await service.processWebhook(req.body);
+            res.status(200).send(result);
+        } catch (error: any) {
+            res.status(400).send(error);
+        }
+    };
+
+    public syncPaymentStatus: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const paymentId = req.params.id;
+            if (!paymentId) {
+                res.status(400).json({ error: 'ID do pagamento é obrigatório.' });
+                return;
+            }
+
+            const result = await service.syncPaymentStatus(paymentId);
+
+            if (!result.success) {
+                res.status(404).json(result);
+                return;
+            }
+
+            res.json(result);
+        } catch (error: any) {
+            console.error('Erro ao sincronizar status do pagamento:', error);
+            res.status(500).json({
+                error: 'Erro ao sincronizar status do pagamento.',
+                message: error.message,
+            });
+        }
+    };
+
+    /**
+     * Debug de um pagamento - retorna informações detalhadas
+     */
+    public debugPayment: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const paymentId = req.params.id;
+            if (!paymentId) {
+                res.status(400).json({ error: 'ID do pagamento é obrigatório.' });
+                return;
+            }
+
+            const result = await service.debugPayment(paymentId);
+            res.json(result);
+        } catch (error: any) {
+            console.error('Erro ao debugar pagamento:', error);
+            res.status(500).json({
+                error: 'Erro ao debugar pagamento.',
+                message: error.message,
+            });
+        }
+    };
 }
