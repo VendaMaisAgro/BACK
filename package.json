@@ -13,8 +13,13 @@
     "setup": "chmod +x ./entrypoint.sh",
     "seed-units": "ts-node scripts/seed-selling-units.ts",
     "seed-sales": "ts-node scripts/seed-sales-data.ts",
+    "seed": "prisma db seed",
     "test": "jest"
   },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
+  },
+
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -76,6 +81,6 @@
     "prisma": "^6.11.1",
     "ts-jest": "^29.4.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.9.3"
   }
 }
