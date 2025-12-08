@@ -89,7 +89,7 @@ export class PaymentService {
         return statusMap[mpStatus] || 'pending';
     }
 
-    private selectBestPaymentMatch(results: any[]): any | null {
+    private selectBestPaymentMatch(results: any[]): any | undefined {
         return results.find((p: any) => p.status === 'approved') ||
                results.find((p: any) => ['pending', 'in_process'].includes(p.status)) ||
                results[0];
