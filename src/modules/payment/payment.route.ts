@@ -4,6 +4,53 @@ import { PaymentController } from './payment.controller';
 
 const router = express.Router();
 const controller = new PaymentController();
+
+/**
+ * @swagger
+ * /payment-methods/webhook:
+ *   post:
+ *     summary: Endpoint para processar webhooks do Mercado Pago
+ *     description: Recebe notificações do Mercado Pago sobre mudanças no status dos pagamentos
+ *     tags: [PaymentMethods]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               type:
+ *                 type: string
+ *                 example: "payment"
+ *               data:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                     example: "123456789"
+ *     responses:
+ *       200:
+ *         description: Webhook processado com sucesso
+ *         content:
+ *           text/plain:
+ *             schema:
+ *               type: string
+ *               example: "OK"
+ *       500:
+ *         description: Erro ao processar webhook
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Erro ao processar webhook."
+ *                 message:
+ *                   type: string
+ */
+router.post('/webhook', controller.processWebhook as RequestHandler);
+
 router.use(protectRoute);
 
 /**
@@ -349,51 +396,5 @@ router.get('/:id/debug', controller.debugPayment as RequestHandler);
  *                   type: string
  */
 router.patch('/:id', controller.updatePayment as RequestHandler);
-
-/**
- * @swagger
- * /payment-methods/webhook:
- *   post:
- *     summary: Endpoint para processar webhooks do Mercado Pago
- *     description: Recebe notificações do Mercado Pago sobre mudanças no status dos pagamentos
- *     tags: [PaymentMethods]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               type:
- *                 type: string
- *                 example: "payment"
- *               data:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: string
- *                     example: "123456789"
- *     responses:
- *       200:
- *         description: Webhook processado com sucesso
- *         content:
- *           text/plain:
- *             schema:
- *               type: string
- *               example: "OK"
- *       500:
- *         description: Erro ao processar webhook
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   example: "Erro ao processar webhook."
- *                 message:
- *                   type: string
- */
-router.post('/webhook', controller.processWebhook as RequestHandler);
 
 export default router;

@@ -84,22 +84,13 @@ export class PaymentController {
         res: Response
     ): Promise<void> => {
         try {
-            const data = req.body;
-            await service.processWebhook(data);
-            res.status(200).send('OK');
+            const result = await service.processWebhook(req.body);
+            res.status(200).send(result);
         } catch (error: any) {
-            console.error(error);
-            res.status(500).json({
-                error: 'Erro ao processar webhook.',
-                message: error.message,
-            });
+            res.status(400).send(error);
         }
     };
 
-    /**
-     * Sincroniza o status de um pagamento com o Mercado Pago
-     * Útil para verificar status manualmente quando o webhook não chega
-     */
     public syncPaymentStatus: RequestHandler = async (
         req: Request,
         res: Response
