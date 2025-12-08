@@ -53,6 +53,27 @@ const stripLocalFrom = (raw: string, local?: string) => {
 const computePricePerKg = (priceNum: number, unitKg: number | null) =>
   unitKg && unitKg > 0 ? Number((priceNum / unitKg).toFixed(2)) : null;
 
+/**
+ * Normaliza um nome de produto para gravação no banco:
+ * - aplica cleanProductName
+ * - remove espaços duplicados
+ * - trim
+ * - UPPERCASE
+ *
+ * Se o resultado ficar vazio, retorna null (caller decide se ignora a linha).
+ */
+const sanitizeProductNameForDb = (raw: string): string | null => {
+  const cleaned = cleanProductName(raw || '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .toUpperCase();
+
+  if (!cleaned) {
+    return null;
+  }
+  return cleaned;
+};
+
 /* ───────── prisma ───────── */
 const prisma = new PrismaClient();
 
@@ -132,9 +153,15 @@ export class PriceRecommendationService {
     logger.info('[AMA Sync] linhas totais:', rawLines.length);
     logger.info('[AMA Sync] produtos detectados:', items.length);
 
-    /* 6 — grava no banco */
-    await prisma.priceRecommendation.createMany({
-      data: items.map(({ name, price, measure }) => {
+    /* 6 — grava no banco (com sanização forte de nome) */
+    const dataToInsert = items
+      .map(({ name, price, measure }) => {
+        const productName = sanitizeProductNameForDb(name);
+        if (!productName) {
+          logger.warn('[AMA Sync] Nome limpo vazio, ignorando linha:', { rawName: name });
+          return null;
+        }
+
         const measureUpper = (measure || '').toUpperCase();
 
         // regra simples: "KG" → Kind=Kg, Kg=1; "UNID." → Kind=Un, Kg=null
@@ -150,7 +177,7 @@ export class PriceRecommendationService {
           productUnitKg && productUnitKg > 0 ? Number((priceNum / productUnitKg).toFixed(2)) : null;
 
         return {
-          productName: cleanProductName(name).trim().toUpperCase(),
+          productName,
           productUnit: null,                 // manter compat; se quiser pode guardar "Kg" / "Un"
           productUnitKind,
           productUnitKg,
@@ -160,9 +187,17 @@ export class PriceRecommendationService {
           date: priceDate,
           algorithmVersion: 'ama-pdf-v1',
         };
-      }),
-      skipDuplicates: true,
-    });
+      })
+      .filter((row): row is any => row !== null);
+
+    if (dataToInsert.length === 0) {
+      logger.warn('[AMA Sync] Nenhum item válido para inserir após sanitização');
+    } else {
+      await prisma.priceRecommendation.createMany({
+        data: dataToInsert,
+        skipDuplicates: true,
+      });
+    }
 
     // mantém a assinatura do endpoint de debug (pares [nome, preço])
     return items.map(({ name, price }) => [name, price] as [string, string]);
@@ -187,25 +222,42 @@ export class PriceRecommendationService {
     const items = await this.collectAgrolink();
 
     if (!overwriteExisting) {
-      const data = items.map((it) => {
-        const raw = stripLocalFrom(it.produto || (it as any).name || '', it.local);
-        const { name, unit } = splitAgrolinkProduct(raw);
-        const details = parseUnitDetails(unit);
-        const priceNum = parseDecimal(it.preco);
-        const pKg = computePricePerKg(priceNum, details.unitKg);
+      const data = items
+        .map((it) => {
+          const raw = stripLocalFrom(it.produto || (it as any).name || '', it.local);
+          const { name, unit } = splitAgrolinkProduct(raw);
+          const productName = sanitizeProductNameForDb(name || raw);
 
-        return {
-          productName: cleanProductName(name || raw).trim().toUpperCase(),
-          productUnit: unit ?? null,
-          productUnitKind: details.unitKind,
-          productUnitKg: details.unitKg,
-          pricePerKg: pKg,
-          marketPrice: priceNum,
-          suggestedPrice: priceNum,
-          date: dateBRToUTCDate(it.data),
-          algorithmVersion: 'agrolink-ocr-v1',
-        };
-      });
+          if (!productName) {
+            logger.warn('[Agrolink Sync] Nome limpo vazio, ignorando item:', {
+              rawProduto: it.produto,
+              parsedName: name,
+            });
+            return null;
+          }
+
+          const details = parseUnitDetails(unit);
+          const priceNum = parseDecimal(it.preco);
+          const pKg = computePricePerKg(priceNum, details.unitKg);
+
+          return {
+            productName,
+            productUnit: unit ?? null,
+            productUnitKind: details.unitKind,
+            productUnitKg: details.unitKg,
+            pricePerKg: pKg,
+            marketPrice: priceNum,
+            suggestedPrice: priceNum,
+            date: dateBRToUTCDate(it.data),
+            algorithmVersion: 'agrolink-ocr-v1',
+          };
+        })
+        .filter((row): row is any => row !== null);
+
+      if (data.length === 0) {
+        logger.warn('[Agrolink Sync] Nenhum item válido para inserir após sanitização');
+        return { coletados: items.length, gravados: 0 };
+      }
 
       const { count } = await prisma.priceRecommendation.createMany({
         data,
@@ -220,8 +272,17 @@ export class PriceRecommendationService {
     for (const it of items) {
       const raw = stripLocalFrom(it.produto || (it as any).name || '', it.local);
       const { name, unit } = splitAgrolinkProduct(raw);
+      const productName = sanitizeProductNameForDb(name || raw);
+
+      if (!productName) {
+        logger.warn('[Agrolink Sync] Nome limpo vazio (overwrite=true), ignorando item:', {
+          rawProduto: it.produto,
+          parsedName: name,
+        });
+        continue;
+      }
+
       const details = parseUnitDetails(unit);
-      const productName = cleanProductName(name || raw).trim().toUpperCase();
       const productUnit = unit ?? null;
       const date = dateBRToUTCDate(it.data);
       const priceNum = parseDecimal(it.preco);
