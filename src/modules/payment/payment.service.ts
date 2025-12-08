@@ -89,6 +89,12 @@ export class PaymentService {
         return statusMap[mpStatus] || 'pending';
     }
 
+    private selectBestPaymentMatch(results: any[]): any | null {
+        return results.find((p: any) => p.status === 'approved') ||
+               results.find((p: any) => ['pending', 'in_process'].includes(p.status)) ||
+               results[0];
+    }
+
     async processWebhook(data: any) {
         try {
             const topic = data.topic || data.type;
@@ -130,9 +136,7 @@ export class PaymentService {
 
                     const results = searchResponse.results || [];
                     if (results.length > 0) {
-                        mpPaymentData = results.find((p: any) => p.status === 'approved') ||
-                            results.find((p: any) => ['pending', 'in_process'].includes(p.status)) ||
-                            results[0];
+                        mpPaymentData = this.selectBestPaymentMatch(results);
                     } else {
                         return {
                             success: true,
@@ -261,9 +265,7 @@ export class PaymentService {
                     ) || [];
 
                     if (results.length > 0) {
-                        mpPaymentData = results.find((p: any) => p.status === 'approved') ||
-                            results.find((p: any) => p.status === 'pending') ||
-                            results[0];
+                        mpPaymentData = this.selectBestPaymentMatch(results);
                     }
                 } catch (err) {
                     console.log("Erro ao buscar pela preference:", err);
@@ -281,7 +283,7 @@ export class PaymentService {
 
                     const results = searchResponse.results || [];
                     if (results.length > 0) {
-                        mpPaymentData = results.find((p: any) => p.status === 'approved') || results[0];
+                        mpPaymentData = this.selectBestPaymentMatch(results);
                     }
                 } catch (err) {
                     console.log("Erro ao buscar por external_reference:", err);
