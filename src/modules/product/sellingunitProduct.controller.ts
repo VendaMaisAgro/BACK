@@ -48,9 +48,9 @@ export class SellingUnitProductController {
 
   async getByProductId(req: Request, res: Response) {
     try {
-      const productId = parseInt(req.params.productId, 10);
+      const productId = req.params.productId;
 
-      if (isNaN(productId)) {
+      if (!productId) {
         return res.status(400).json({ error: "ID do produto deve ser um número válido" });
       }
 
@@ -69,9 +69,9 @@ export class SellingUnitProductController {
 
   async getById(req: Request, res: Response) {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = req.params.id;
 
-      if (isNaN(id)) {
+      if (!id) {
         return res.status(400).json({ error: "ID deve ser um número válido" });
       }
 
@@ -90,9 +90,9 @@ export class SellingUnitProductController {
 
   async update(req: Request, res: Response) {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = req.params.id;
 
-      if (isNaN(id)) {
+      if (!id) {
         return res.status(400).json({ error: "ID deve ser um número válido" });
       }
 
@@ -127,9 +127,9 @@ export class SellingUnitProductController {
 
   async delete(req: Request, res: Response) {
     try {
-      const id = parseInt(req.params.id, 10);
+      const id = req.params.id;
 
-      if (isNaN(id)) {
+      if (!id) {
         return res.status(400).json({ error: "ID deve ser um número válido" });
       }
 
@@ -158,9 +158,9 @@ export class SellingUnitProductController {
 
   async deleteByProductId(req: Request, res: Response) {
     try {
-      const productId = parseInt(req.params.productId, 10);
+      const productId = req.params.productId;
 
-      if (isNaN(productId)) {
+      if (!productId) {
         return res.status(400).json({ error: "ID do produto deve ser um número válido" });
       }
 
