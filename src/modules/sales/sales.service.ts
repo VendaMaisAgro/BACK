@@ -111,10 +111,38 @@ export class SaleService {
   }
 
   async getById(id: string) {
-    return this.prisma.saleData.findUnique({
+    const sale = await this.prisma.saleData.findUnique({
       where: { id },
-      include: { boughtProducts: true },
+      include: {
+        boughtProducts: true,
+        Payment: true
+      },
     });
+
+    if (!sale) {
+      return null;
+    }
+
+    // Verifica se existe algum pagamento com status 'completed'
+    const hasCompletedPayment = sale.Payment?.some(payment => payment.status === 'completed');
+
+    // Se o pagamento foi completado mas o campo paymentCompleted ainda é false, atualiza
+    if (hasCompletedPayment && !sale.paymentCompleted) {
+      const updatedSale = await this.prisma.saleData.update({
+        where: { id },
+        data: {
+          paymentCompleted: true,
+          status: 'Pagamento confirmado!'
+        },
+        include: {
+          boughtProducts: true,
+          Payment: true
+        },
+      });
+      return updatedSale;
+    }
+
+    return sale;
   }
 
   async getSalesForProducer(userId: string) {
