@@ -22,6 +22,8 @@ export class PaymentService {
         amount: number;
     }) {
         try {
+            console.info(`[createPreference] Criando preferência de pagamento para venda ${params.saleId}`);
+
             const response = await preference.create({
                 body: {
                     items: [
@@ -53,12 +55,15 @@ export class PaymentService {
                 }
             });
 
+            console.info(`[createPreference] Preferência criada com sucesso - PaymentId: ${payment.id}, MP PreferenceId: ${response.id}`);
+
             return {
                 paymentId: payment.id,
                 mp_preference_id: response.id,
                 init_point: response.init_point
             };
         } catch (error: any) {
+            console.error(`[createPreference] Erro ao criar preferência para venda ${params.saleId}:`, error.message);
             throw new Error(error.message || 'Erro ao criar preferência do Mercado Pago');
         }
     }
@@ -95,8 +100,10 @@ export class PaymentService {
             const action = data.action;
             const resourceId = data.data?.id || data.id;
 
+            console.info(`[Webhook] Recebido webhook - Topic: ${topic}, Action: ${action}, ResourceId: ${resourceId}`);
+
             if (!resourceId) {
-                console.warn("⚠️ Webhook sem resource ID");
+                console.warn("[Webhook] ⚠️ Webhook sem resource ID válido");
                 return { error: "Webhook sem ID de recurso válido" };
             }
 
@@ -182,30 +189,36 @@ export class PaymentService {
             const newStatus = this.mapMercadoPagoStatus(mpPaymentData.status);
 
             if (paymentRecord.status !== newStatus) {
-                const updatedPayment = await this.prisma.payment.update({
-                    where: { id: paymentRecord.id },
-                    data: {
-                        status: newStatus,
-                        mp_payment_id: String(mpPaymentData.id),
-                        updatedAt: new Date()
-                    }
-                });
+                console.info(`[Webhook] Atualizando pagamento ${paymentRecord.id}: ${paymentRecord.status} -> ${newStatus}`);
 
-                if (newStatus === 'completed') {
-                    try {
-                        const updatedSale = await this.prisma.saleData.update({
+                // Usa transação para garantir atomicidade entre atualização do pagamento e da venda
+                await this.prisma.$transaction(async (tx) => {
+                    // Atualiza o status do pagamento
+                    await tx.payment.update({
+                        where: { id: paymentRecord.id },
+                        data: {
+                            status: newStatus,
+                            mp_payment_id: String(mpPaymentData.id),
+                            updatedAt: new Date()
+                        }
+                    });
+
+                    // Se o pagamento foi completado, atualiza a venda
+                    if (newStatus === 'completed') {
+                        console.info(`[Webhook] Pagamento completado! Atualizando venda ${paymentRecord.saleId}`);
+                        await tx.saleData.update({
                             where: { id: paymentRecord.saleId },
                             data: {
                                 status: 'Pagamento confirmado!',
                                 paymentCompleted: true
                             }
                         });
-                    } catch (saleError: any) {
-                        console.error("Erro ao atualizar venda:", saleError.message);
                     }
-                }
+                });
+
+                console.info(`[Webhook] Pagamento ${paymentRecord.id} atualizado com sucesso`);
             } else {
-                console.log("Status não mudou, nenhuma atualização necessária");
+                console.info(`[Webhook] Status do pagamento ${paymentRecord.id} não mudou (${paymentRecord.status}), nenhuma atualização necessária`);
             }
 
             return {
@@ -242,7 +255,7 @@ export class PaymentService {
                 try {
                     mpPaymentData = await mpPayment.get({ id: paymentRecord.mp_payment_id });
                 } catch (err) {
-                    console.log("Não encontrado pelo mp_payment_id");
+                    console.warn(`[syncPaymentStatus] Pagamento não encontrado no MP pelo mp_payment_id: ${paymentRecord.mp_payment_id}`);
                 }
             }
 
@@ -265,8 +278,8 @@ export class PaymentService {
                             results.find((p: any) => p.status === 'pending') ||
                             results[0];
                     }
-                } catch (err) {
-                    console.log("Erro ao buscar pela preference:", err);
+                } catch (err: any) {
+                    console.warn(`[syncPaymentStatus] Erro ao buscar pagamento pela preference ${paymentRecord.mp_preference_id}: ${err.message || err}`);
                 }
             }
 
@@ -283,8 +296,8 @@ export class PaymentService {
                     if (results.length > 0) {
                         mpPaymentData = results.find((p: any) => p.status === 'approved') || results[0];
                     }
-                } catch (err) {
-                    console.log("Erro ao buscar por external_reference:", err);
+                } catch (err: any) {
+                    console.warn(`[syncPaymentStatus] Erro ao buscar pagamento por external_reference ${paymentRecord.saleId}: ${err.message || err}`);
                 }
             }
 
@@ -298,24 +311,35 @@ export class PaymentService {
             }
 
             const newStatus = this.mapMercadoPagoStatus(mpPaymentData.status);
-            const updatedPayment = await this.prisma.payment.update({
-                where: { id: paymentRecord.id },
-                data: {
-                    status: newStatus,
-                    mp_payment_id: String(mpPaymentData.id),
-                    updatedAt: new Date()
-                }
-            });
+            console.info(`[syncPaymentStatus] Sincronizando pagamento ${paymentRecord.id}: ${paymentRecord.status} -> ${newStatus}`);
 
-            if (newStatus === 'completed') {
-                await this.prisma.saleData.update({
-                    where: { id: paymentRecord.saleId },
+            // Usa transação para garantir atomicidade entre atualização do pagamento e da venda
+            const updatedPayment = await this.prisma.$transaction(async (tx) => {
+                const payment = await tx.payment.update({
+                    where: { id: paymentRecord.id },
                     data: {
-                        status: 'Pagamento confirmado!',
-                        paymentCompleted: true
+                        status: newStatus,
+                        mp_payment_id: String(mpPaymentData.id),
+                        updatedAt: new Date()
                     }
                 });
-            }
+
+                // Se o pagamento foi completado, atualiza a venda
+                if (newStatus === 'completed') {
+                    console.info(`[syncPaymentStatus] Pagamento completado! Atualizando venda ${paymentRecord.saleId}`);
+                    await tx.saleData.update({
+                        where: { id: paymentRecord.saleId },
+                        data: {
+                            status: 'Pagamento confirmado!',
+                            paymentCompleted: true
+                        }
+                    });
+                }
+
+                return payment;
+            });
+
+            console.info(`[syncPaymentStatus] Pagamento ${paymentRecord.id} sincronizado com sucesso`);
 
             return {
                 success: true,
@@ -364,8 +388,8 @@ export class PaymentService {
             if (paymentRecord.mp_payment_id) {
                 try {
                     mpData = await mpPayment.get({ id: paymentRecord.mp_payment_id });
-                } catch (err) {
-                    console.log("Não encontrado por mp_payment_id");
+                } catch (err: any) {
+                    console.warn(`[debugPayment] Pagamento não encontrado no MP pelo mp_payment_id: ${paymentRecord.mp_payment_id}`);
                 }
             }
 
@@ -378,8 +402,8 @@ export class PaymentService {
                         }
                     });
                     mpData = searchResponse.results?.[0] || null;
-                } catch (err) {
-                    console.log("Não encontrado por external_reference");
+                } catch (err: any) {
+                    console.warn(`[debugPayment] Pagamento não encontrado no MP por external_reference: ${paymentRecord.saleId}`);
                 }
             }
 

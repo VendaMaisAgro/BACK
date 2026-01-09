@@ -111,38 +111,41 @@ export class SaleService {
   }
 
   async getById(id: string) {
-    const sale = await this.prisma.saleData.findUnique({
-      where: { id },
-      include: {
-        boughtProducts: true,
-        Payment: true
-      },
-    });
-
-    if (!sale) {
-      return null;
-    }
-
-    // Verifica se existe algum pagamento com status 'completed'
-    const hasCompletedPayment = sale.Payment?.some(payment => payment.status === 'completed');
-
-    // Se o pagamento foi completado mas o campo paymentCompleted ainda é false, atualiza
-    if (hasCompletedPayment && !sale.paymentCompleted) {
-      const updatedSale = await this.prisma.saleData.update({
+    // Usa transação para evitar race condition entre leitura e atualização
+    return await this.prisma.$transaction(async (tx) => {
+      const sale = await tx.saleData.findUnique({
         where: { id },
-        data: {
-          paymentCompleted: true,
-          status: 'Pagamento confirmado!'
-        },
         include: {
           boughtProducts: true,
           Payment: true
         },
       });
-      return updatedSale;
-    }
 
-    return sale;
+      if (!sale) {
+        return null;
+      }
+
+      // Verifica se existe algum pagamento com status 'completed'
+      const hasCompletedPayment = sale.Payment?.some(payment => payment.status === 'completed');
+
+      // Se o pagamento foi completado mas o campo paymentCompleted ainda é false, atualiza
+      if (hasCompletedPayment && !sale.paymentCompleted) {
+        const updatedSale = await tx.saleData.update({
+          where: { id },
+          data: {
+            paymentCompleted: true,
+            status: 'Pagamento confirmado!'
+          },
+          include: {
+            boughtProducts: true,
+            Payment: true
+          },
+        });
+        return updatedSale;
+      }
+
+      return sale;
+    });
   }
 
   async getSalesForProducer(userId: string) {
@@ -361,23 +364,26 @@ export class SaleService {
   }
 
   async delete(id: string) {
-    // Primeiro, deletar os produtos comprados associados à venda
-    await this.prisma.boughtProduct.deleteMany({
-      where: { saleDataId: id }
-    });
+    // Usa transação para garantir atomicidade: se qualquer operação falhar, todas são revertidas
+    return await this.prisma.$transaction(async (tx) => {
+      // Primeiro, deletar os produtos comprados associados à venda
+      await tx.boughtProduct.deleteMany({
+        where: { saleDataId: id }
+      });
 
-    // Depois, deletar os pagamentos associados à venda
-    await this.prisma.payment.deleteMany({
-      where: { saleId: id }
-    });
+      // Depois, deletar os pagamentos associados à venda
+      await tx.payment.deleteMany({
+        where: { saleId: id }
+      });
 
-    // Deletar as aceitações de contrato associadas à venda
-    await this.prisma.contractAcceptance.deleteMany({
-      where: { saleId: id }
-    });
+      // Deletar as aceitações de contrato associadas à venda
+      await tx.contractAcceptance.deleteMany({
+        where: { saleId: id }
+      });
 
-    // Por fim, deletar a venda
-    return this.prisma.saleData.delete({ where: { id } });
+      // Por fim, deletar a venda
+      return tx.saleData.delete({ where: { id } });
+    });
   }
 
   async calculateFreight(saleDataId: string, distanceKm: number, pricePerKm: number) {
