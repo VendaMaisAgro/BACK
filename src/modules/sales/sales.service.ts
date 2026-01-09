@@ -361,6 +361,22 @@ export class SaleService {
   }
 
   async delete(id: string) {
+    // Primeiro, deletar os produtos comprados associados à venda
+    await this.prisma.boughtProduct.deleteMany({
+      where: { saleDataId: id }
+    });
+
+    // Depois, deletar os pagamentos associados à venda
+    await this.prisma.payment.deleteMany({
+      where: { saleId: id }
+    });
+
+    // Deletar as aceitações de contrato associadas à venda
+    await this.prisma.contractAcceptance.deleteMany({
+      where: { saleId: id }
+    });
+
+    // Por fim, deletar a venda
     return this.prisma.saleData.delete({ where: { id } });
   }
 
