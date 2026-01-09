@@ -111,9 +111,17 @@ export class SaleService {
   }
 
   async getById(id: string) {
-    return this.prisma.saleData.findUnique({
-      where: { id },
-      include: { boughtProducts: true },
+
+    return await this.prisma.$transaction(async (tx) => {
+      const sale = await tx.saleData.findUnique({
+        where: { id },
+        include: {
+          boughtProducts: true,
+          Payment: true
+        },
+      });
+
+      return sale;
     });
   }
 
@@ -333,7 +341,26 @@ export class SaleService {
   }
 
   async delete(id: string) {
-    return this.prisma.saleData.delete({ where: { id } });
+    // Usa transação para garantir atomicidade: se qualquer operação falhar, todas são revertidas
+    return await this.prisma.$transaction(async (tx) => {
+      // Primeiro, deletar os produtos comprados associados à venda
+      await tx.boughtProduct.deleteMany({
+        where: { saleDataId: id }
+      });
+
+      // Depois, deletar os pagamentos associados à venda
+      await tx.payment.deleteMany({
+        where: { saleId: id }
+      });
+
+      // Deletar as aceitações de contrato associadas à venda
+      await tx.contractAcceptance.deleteMany({
+        where: { saleId: id }
+      });
+
+      // Por fim, deletar a venda
+      return tx.saleData.delete({ where: { id } });
+    });
   }
 
   async calculateFreight(saleDataId: string, distanceKm: number, pricePerKm: number) {
