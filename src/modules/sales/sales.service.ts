@@ -111,7 +111,7 @@ export class SaleService {
   }
 
   async getById(id: string) {
-    // Usa transação para evitar race condition entre leitura e atualização
+
     return await this.prisma.$transaction(async (tx) => {
       const sale = await tx.saleData.findUnique({
         where: { id },
@@ -120,29 +120,6 @@ export class SaleService {
           Payment: true
         },
       });
-
-      if (!sale) {
-        return null;
-      }
-
-      // Verifica se existe algum pagamento com status 'completed'
-      const hasCompletedPayment = sale.Payment?.some(payment => payment.status === 'completed');
-
-      // Se o pagamento foi completado mas o campo paymentCompleted ainda é false, atualiza
-      if (hasCompletedPayment && !sale.paymentCompleted) {
-        const updatedSale = await tx.saleData.update({
-          where: { id },
-          data: {
-            paymentCompleted: true,
-            status: 'Pagamento confirmado!'
-          },
-          include: {
-            boughtProducts: true,
-            Payment: true
-          },
-        });
-        return updatedSale;
-      }
 
       return sale;
     });
