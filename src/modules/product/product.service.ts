@@ -283,6 +283,25 @@ export class ProductService {
       });
       if (!product) throw new Error("Produto não encontrado");
 
+      await this.prisma.boughtProduct.deleteMany({ where: { productId: id } });
+      await this.prisma.sellingUnitProduct.deleteMany({ where: { productId: id } });
+      await this.prisma.question.deleteMany({ where: { productId: id } });
+      await this.prisma.cartItem.deleteMany({ where: { productId: id } });
+
+      if (product.images_Path && product.images_Path.length > 0) {
+        const deleteImagePromises = product.images_Path.map(async (url: string) => {
+          try {
+            const key = this.extractKeyFromUrl(url);
+            if (key) {
+              await this.uploadService.delete(key);
+            }
+          } catch (error) {
+            console.warn(`Erro ao deletar imagem ${url}:`, error);
+          }
+        });
+        await Promise.allSettled(deleteImagePromises);
+      }
+
       await this.prisma.product.delete({ where: { id } });
 
       return { message: "Produto deletado com sucesso" };
