@@ -1,14 +1,11 @@
 import { Payment, PrismaClient } from '@prisma/client';
-import { MercadoPagoConfig, Preference, Payment as MPPayment, PaymentMethod, Order } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment as MPPayment } from 'mercadopago';
 import type { PaymentResponse } from 'mercadopago/dist/clients/payment/commonTypes';
-import { randomUUID } from 'crypto';
 import 'dotenv/config';
 
 const client = new MercadoPagoConfig({ accessToken: process.env.ACCESS_TOKEN || 'MERCADO_PAGO_ACCESS_TOKEN' });
 const preference = new Preference(client);
 const mpPayment = new MPPayment(client);
-const paymentMethod = new PaymentMethod(client);
-const orderClient = new Order(client);
 
 export class PaymentService {
     private readonly prisma: PrismaClient;
@@ -77,113 +74,6 @@ export class PaymentService {
         });
     }
 
-    /**
-     * Lista todos os meios de pagamento disponíveis
-     */
-    async getPaymentMethods() {
-        try {
-            console.info('[getPaymentMethods] Buscando meios de pagamento disponíveis');
-            const methods = await paymentMethod.get();
-            return methods;
-        } catch (error: any) {
-            console.error('[getPaymentMethods] Erro ao buscar meios de pagamento:', error.message);
-            throw new Error(error.message || 'Erro ao buscar meios de pagamento');
-        }
-    }
-
-    /**
-     * Cria um pagamento PIX usando a Orders API (Checkout Transparente)
-     * @param params.saleId - ID da venda
-     * @param params.paymentMethodId - ID do método de pagamento no banco local
-     * @param params.amount - Valor do pagamento
-     * @param params.email - Email do pagador
-     * @param params.expirationMinutes - Tempo de expiração em minutos (opcional, padrão: 30 minutos)
-     */
-    async createPixPayment(params: {
-        saleId: string;
-        paymentMethodId: string;
-        amount: number;
-        email: string;
-        expirationMinutes?: number;
-    }) {
-        try {
-            console.info(`[createPixPayment] Criando pagamento PIX para venda ${params.saleId}`);
-
-            const expirationMinutes = params.expirationMinutes || 30;
-            // Formato ISO 8601 para duração: PT30M = 30 minutos
-            const expirationTime = `PT${expirationMinutes}M`;
-
-            // Gera chave de idempotência única
-            const idempotencyKey = randomUUID();
-
-            // Cria a order com pagamento PIX
-            const orderResponse = await orderClient.create({
-                body: {
-                    type: 'online',
-                    total_amount: params.amount.toFixed(2),
-                    external_reference: params.saleId,
-                    processing_mode: 'automatic',
-                    transactions: {
-                        payments: [
-                            {
-                                amount: params.amount.toFixed(2),
-                                payment_method: {
-                                    id: 'pix',
-                                    type: 'bank_transfer'
-                                },
-                                expiration_time: expirationTime
-                            }
-                        ]
-                    },
-                    payer: {
-                        email: params.email
-                    }
-                },
-                requestOptions: {
-                    idempotencyKey: idempotencyKey
-                }
-            });
-
-            // Extrai dados do pagamento da resposta
-            const paymentData = orderResponse.transactions?.payments?.[0];
-
-            if (!paymentData) {
-                throw new Error('Resposta da API não contém dados de pagamento');
-            }
-
-            // Salva o pagamento no banco de dados
-            const payment = await this.prisma.payment.create({
-                data: {
-                    saleId: params.saleId,
-                    paymentMethodId: params.paymentMethodId,
-                    amount: params.amount,
-                    status: 'pending',
-                    mp_order_id: orderResponse.id,
-                    mp_payment_id: paymentData.id,
-                }
-            });
-
-            console.info(`[createPixPayment] Pagamento PIX criado com sucesso - PaymentId: ${payment.id}, OrderId: ${orderResponse.id}`);
-
-            return {
-                paymentId: payment.id,
-                orderId: orderResponse.id,
-                orderStatus: orderResponse.status,
-                payment: {
-                    id: paymentData.id,
-                    status: paymentData.status,
-                    status_detail: paymentData.status_detail,
-                    qr_code: paymentData.payment_method?.qr_code,
-                    qr_code_base64: paymentData.payment_method?.qr_code_base64,
-                    ticket_url: paymentData.payment_method?.ticket_url
-                }
-            };
-        } catch (error: any) {
-            console.error(`[createPixPayment] Erro ao criar pagamento PIX para venda ${params.saleId}:`, error.message);
-            throw new Error(error.message || 'Erro ao criar pagamento PIX');
-        }
-    }
-
     async updatePayment(paymentId: string, data: Partial<Payment>) {
         return this.prisma.payment.update({
             where: { id: paymentId },
@@ -193,21 +83,13 @@ export class PaymentService {
 
     private mapMercadoPagoStatus(mpStatus: string): string {
         const statusMap: Record<string, string> = {
-            // Status da Payment API (antiga)
             'approved': 'completed',
             'pending': 'pending',
             'in_process': 'pending',
             'rejected': 'failed',
             'cancelled': 'cancelled',
             'refunded': 'refunded',
-            'charged_back': 'refunded',
-
-            // Status da Orders API (nova)
-            'action_required': 'pending',  // Aguardando ação do usuário (ex: pagar PIX)
-            'processed': 'completed',       // Order processada com sucesso
-            'expired': 'failed',            // Order expirada
-            'cancelled_by_payer': 'cancelled',
-            'cancelled_by_seller': 'cancelled'
+            'charged_back': 'refunded'
         };
         return statusMap[mpStatus] || 'pending';
     }
@@ -223,11 +105,6 @@ export class PaymentService {
             if (!resourceId) {
                 console.warn("[Webhook] ⚠️ Webhook sem resource ID válido");
                 return { error: "Webhook sem ID de recurso válido" };
-            }
-
-            // Se for webhook de Order (começa com "ORD"), processa diferente
-            if (topic === 'order' || resourceId.startsWith('ORD')) {
-                return this.processOrderWebhook(resourceId, data);
             }
 
             await new Promise(resolve => setTimeout(resolve, 1500));
@@ -361,109 +238,6 @@ export class PaymentService {
         }
     }
 
-    /**
-     * Processa webhooks da Orders API (PIX e outros pagamentos do Checkout Transparente)
-     */
-    private async processOrderWebhook(orderId: string, webhookData: any) {
-        try {
-            console.info(`[processOrderWebhook] Processando webhook para Order ${orderId}`);
-
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            // Busca a order no Mercado Pago
-            let orderData: any;
-            try {
-                orderData = await orderClient.get({ id: orderId });
-            } catch (error: any) {
-                console.error(`[processOrderWebhook] Erro ao buscar order ${orderId}:`, error.message);
-                return { error: 'Erro ao buscar order no Mercado Pago', message: error.message };
-            }
-
-            const externalReference = orderData.external_reference;
-            if (!externalReference) {
-                console.error('[processOrderWebhook] Order sem external_reference');
-                return { error: 'Order sem external_reference' };
-            }
-
-            // Busca o pagamento no banco pelo external_reference (saleId) ou mp_order_id
-            let paymentRecord = await this.prisma.payment.findFirst({
-                where: {
-                    OR: [
-                        { saleId: externalReference },
-                        { mp_order_id: orderId }
-                    ]
-                },
-                orderBy: { createdAt: 'desc' }
-            });
-
-            if (!paymentRecord) {
-                console.error(`[processOrderWebhook] Payment não encontrado para order ${orderId}`);
-                return { error: 'Payment não encontrado no banco' };
-            }
-
-            // Extrai dados do pagamento da order
-            const paymentData = orderData.transactions?.payments?.[0];
-            if (!paymentData) {
-                console.warn('[processOrderWebhook] Order sem dados de pagamento');
-                return {
-                    success: true,
-                    message: 'Order recebida mas sem dados de pagamento ainda'
-                };
-            }
-
-            // Mapeia o status do pagamento
-            const newStatus = this.mapMercadoPagoStatus(paymentData.status);
-
-            if (paymentRecord.status !== newStatus) {
-                console.info(`[processOrderWebhook] Atualizando pagamento ${paymentRecord.id}: ${paymentRecord.status} -> ${newStatus}`);
-
-                await this.prisma.$transaction(async (tx) => {
-                    await tx.payment.update({
-                        where: { id: paymentRecord.id },
-                        data: {
-                            status: newStatus,
-                            mp_order_id: orderId,
-                            mp_payment_id: paymentData.id,
-                            updatedAt: new Date()
-                        }
-                    });
-
-                    // Se o pagamento foi completado, atualiza a venda
-                    if (newStatus === 'completed') {
-                        console.info(`[processOrderWebhook] Pagamento completado! Atualizando venda ${paymentRecord.saleId}`);
-                        await tx.saleData.update({
-                            where: { id: paymentRecord.saleId },
-                            data: {
-                                status: 'Pagamento confirmado!',
-                                paymentCompleted: true
-                            }
-                        });
-                    }
-                });
-
-                console.info(`[processOrderWebhook] Pagamento ${paymentRecord.id} atualizado com sucesso`);
-            } else {
-                console.info(`[processOrderWebhook] Status do pagamento ${paymentRecord.id} não mudou (${paymentRecord.status})`);
-            }
-
-            return {
-                success: true,
-                paymentId: paymentRecord.id,
-                saleId: paymentRecord.saleId,
-                orderId: orderId,
-                status: newStatus,
-                mp_payment_id: paymentData.id,
-                mp_status: paymentData.status,
-                mp_status_detail: paymentData.status_detail
-            };
-
-        } catch (error: any) {
-            console.error('[processOrderWebhook] Erro crítico:', error.message);
-            console.error('Stack:', error.stack);
-            return { error: 'Erro ao processar webhook de order', message: error.message };
-        }
-    }
-
     async syncPaymentStatus(paymentId: string) {
         try {
             const paymentRecord = await this.prisma.payment.findUnique({
@@ -477,22 +251,7 @@ export class PaymentService {
 
             let mpPaymentData: any = null;
 
-            // Se tiver mp_order_id, é um pagamento da Orders API (PIX via Checkout Transparente)
-            // Comentado temporariamente até gerar o cliente Prisma com o novo campo
-            // if (paymentRecord.mp_order_id) {
-            //     try {
-            //         const orderData = await orderClient.get({ id: paymentRecord.mp_order_id });
-            //         mpPaymentData = orderData.transactions?.payments?.[0];
-            //         if (mpPaymentData) {
-            //             mpPaymentData.mp_order_id = paymentRecord.mp_order_id;
-            //         }
-            //     } catch (err: any) {
-            //         console.warn(`[syncPaymentStatus] Order não encontrada no MP pelo mp_order_id: ${paymentRecord.mp_order_id}`);
-            //     }
-            // }
-
-            // Tenta buscar pelo mp_payment_id (API antiga e nova)
-            if (!mpPaymentData && paymentRecord.mp_payment_id) {
+            if (paymentRecord.mp_payment_id) {
                 try {
                     mpPaymentData = await mpPayment.get({ id: paymentRecord.mp_payment_id });
                 } catch (err) {
@@ -660,70 +419,6 @@ export class PaymentService {
         }
     }
 
-    /**
-     * Cancela um pagamento PIX pendente ou em processamento
-     * Segundo a documentação, só pode cancelar pagamentos com status=action_required
-     */
-    async cancelPixPayment(paymentId: string) {
-        try {
-            const paymentRecord = await this.prisma.payment.findUnique({
-                where: { id: paymentId }
-            });
-
-            if (!paymentRecord) {
-                return { error: "Payment não encontrado no banco", success: false };
-            }
-
-            // Comentado temporariamente até gerar o cliente Prisma com o novo campo
-            // if (!paymentRecord.mp_order_id) {
-            //     return { error: "Payment não possui mp_order_id (não é um pagamento PIX)", success: false };
-            // }
-
-            // Verifica se o pagamento está em status que permite cancelamento
-            if (paymentRecord.status !== 'pending') {
-                return {
-                    error: `Pagamento não pode ser cancelado. Status atual: ${paymentRecord.status}`,
-                    success: false
-                };
-            }
-
-            console.info(`[cancelPixPayment] Cancelando pagamento PIX ${paymentId}`);
-
-            // Cancela a order via API do Mercado Pago
-            // Comentado temporariamente até gerar o cliente Prisma
-            // try {
-            //     await orderClient.cancel({ id: paymentRecord.mp_order_id });
-            // } catch (error: any) {
-            //     console.error(`[cancelPixPayment] Erro ao cancelar order no MP:`, error.message);
-            //     return { error: 'Erro ao cancelar order no Mercado Pago', message: error.message, success: false };
-            // }
-
-            // Atualiza o status no banco de dados
-            const updatedPayment = await this.prisma.payment.update({
-                where: { id: paymentId },
-                data: {
-                    status: 'cancelled',
-                    updatedAt: new Date()
-                }
-            });
-
-            console.info(`[cancelPixPayment] Pagamento ${paymentId} cancelado com sucesso`);
-
-            return {
-                success: true,
-                paymentId: updatedPayment.id,
-                status: updatedPayment.status
-            };
-
-        } catch (error: any) {
-            console.error('[cancelPixPayment] Erro ao cancelar pagamento:', error.message);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
-    }
-
     async configureWebhook() {
         try {
             const webhookUrl = `${process.env.URL_BACKEND}/payment-methods/webhook`;
@@ -738,8 +433,7 @@ export class PaymentService {
                     url: webhookUrl,
                     events: [
                         { topic: 'payment' },
-                        { topic: 'merchant_order' },
-                        { topic: 'order' }  // Adiciona suporte para webhooks de Orders
+                        { topic: 'merchant_order' }
                     ]
                 })
             });

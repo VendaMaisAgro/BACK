@@ -134,9 +134,8 @@ model Payment {
   paymentMethodId  String
   amount           Float
   status           String
-  mp_preference_id String?
-  mp_payment_id    String?
-  mp_order_id      String?
+  mp_preference_id String? 
+  mp_payment_id    String? 
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
