@@ -690,7 +690,7 @@ export class PaymentService {
 
             // Cancela a order via API do Mercado Pago
             try {
-                await orderClient.cancel({ id: paymentRecord.mp_order_id });
+                await orderClient.cancel({ id: paymentRecord.mp_order_id! });
             } catch (error: any) {
                 console.error(`[cancelPixPayment] Erro ao cancelar order no MP:`, error.message);
                 return { error: 'Erro ao cancelar order no Mercado Pago', message: error.message, success: false };
