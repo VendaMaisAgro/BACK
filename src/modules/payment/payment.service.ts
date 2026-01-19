@@ -674,7 +674,7 @@ export class PaymentService {
                 return { error: "Payment não encontrado no banco", success: false };
             }
 
-            if (!paymentRecord.mp_order_id || paymentRecord.mp_order_id.trim() === '') {
+            if (!paymentRecord.mp_order_id || typeof paymentRecord.mp_order_id !== 'string' || paymentRecord.mp_order_id.trim() === '') {
                 return { error: "Payment não possui mp_order_id (não é um pagamento PIX)", success: false };
             }
 
