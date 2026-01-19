@@ -674,10 +674,9 @@ export class PaymentService {
                 return { error: "Payment não encontrado no banco", success: false };
             }
 
-            // Comentado temporariamente até gerar o cliente Prisma com o novo campo
-            // if (!paymentRecord.mp_order_id) {
-            //     return { error: "Payment não possui mp_order_id (não é um pagamento PIX)", success: false };
-            // }
+            if (!paymentRecord.mp_order_id) {
+                return { error: "Payment não possui mp_order_id (não é um pagamento PIX)", success: false };
+            }
 
             // Verifica se o pagamento está em status que permite cancelamento
             if (paymentRecord.status !== 'pending') {
@@ -690,13 +689,12 @@ export class PaymentService {
             console.info(`[cancelPixPayment] Cancelando pagamento PIX ${paymentId}`);
 
             // Cancela a order via API do Mercado Pago
-            // Comentado temporariamente até gerar o cliente Prisma
-            // try {
-            //     await orderClient.cancel({ id: paymentRecord.mp_order_id });
-            // } catch (error: any) {
-            //     console.error(`[cancelPixPayment] Erro ao cancelar order no MP:`, error.message);
-            //     return { error: 'Erro ao cancelar order no Mercado Pago', message: error.message, success: false };
-            // }
+            try {
+                await orderClient.cancel({ id: paymentRecord.mp_order_id });
+            } catch (error: any) {
+                console.error(`[cancelPixPayment] Erro ao cancelar order no MP:`, error.message);
+                return { error: 'Erro ao cancelar order no Mercado Pago', message: error.message, success: false };
+            }
 
             // Atualiza o status no banco de dados
             const updatedPayment = await this.prisma.payment.update({
