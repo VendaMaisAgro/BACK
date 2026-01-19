@@ -10,7 +10,7 @@ const controller = new PaymentController();
  * /payment-methods/webhook:
  *   post:
  *     summary: Endpoint para processar webhooks do Mercado Pago
- *     description: Recebe notificações do Mercado Pago sobre mudanças no status dos pagamentos
+ *     description: Recebe notificações do Mercado Pago sobre mudanças no status dos pagamentos (Payment API e Orders API)
  *     tags: [PaymentMethods]
  *     requestBody:
  *       required: true
@@ -22,20 +22,33 @@ const controller = new PaymentController();
  *               type:
  *                 type: string
  *                 example: "payment"
+ *               topic:
+ *                 type: string
+ *                 example: "order"
+ *               action:
+ *                 type: string
+ *                 example: "payment.updated"
  *               data:
  *                 type: object
  *                 properties:
  *                   id:
  *                     type: string
- *                     example: "123456789"
+ *                     example: "ORD01HRYFWNYRE1MR1E60MW3X0T2P"
  *     responses:
  *       200:
  *         description: Webhook processado com sucesso
  *         content:
- *           text/plain:
+ *           application/json:
  *             schema:
- *               type: string
- *               example: "OK"
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 paymentId:
+ *                   type: string
+ *                 status:
+ *                   type: string
  *       500:
  *         description: Erro ao processar webhook
  *         content:
@@ -396,5 +409,222 @@ router.get('/:id/debug', controller.debugPayment as RequestHandler);
  *                   type: string
  */
 router.patch('/:id', controller.updatePayment as RequestHandler);
+
+/**
+ * @swagger
+ * /payment-methods/methods:
+ *   get:
+ *     summary: Lista todos os meios de pagamento disponíveis
+ *     description: Retorna todos os métodos de pagamento aceitos pelo Mercado Pago
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de meios de pagamento retornada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                     example: "pix"
+ *                   name:
+ *                     type: string
+ *                     example: "PIX"
+ *                   payment_type_id:
+ *                     type: string
+ *                     example: "bank_transfer"
+ *                   status:
+ *                     type: string
+ *                     example: "active"
+ *       500:
+ *         description: Erro ao buscar meios de pagamento
+ */
+router.get('/methods', controller.getPaymentMethods as RequestHandler);
+
+/**
+ * @swagger
+ * /payment-methods/pix:
+ *   post:
+ *     summary: Cria um pagamento PIX usando Orders API (Checkout Transparente)
+ *     description: Cria um pagamento PIX instantâneo retornando QR Code e Pix Copia e Cola
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - saleId
+ *               - paymentMethodId
+ *               - amount
+ *               - email
+ *             properties:
+ *               saleId:
+ *                 type: string
+ *                 description: ID da venda no sistema
+ *                 example: "sale-123-abc-456"
+ *               paymentMethodId:
+ *                 type: string
+ *                 description: ID do método de pagamento (PIX)
+ *                 example: "pm-pix-001"
+ *               amount:
+ *                 type: number
+ *                 description: Valor do pagamento
+ *                 example: 150.50
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Email do pagador
+ *                 example: "cliente@example.com"
+ *               expirationMinutes:
+ *                 type: number
+ *                 description: Tempo de expiração em minutos (30 a 43200 - 30 dias)
+ *                 example: 60
+ *                 default: 30
+ *     responses:
+ *       201:
+ *         description: Pagamento PIX criado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 paymentId:
+ *                   type: string
+ *                   description: ID do pagamento no banco local
+ *                   example: "pay-uuid-123-456"
+ *                 orderId:
+ *                   type: string
+ *                   description: ID da Order no Mercado Pago
+ *                   example: "ORD01HRYFWNYRE1MR1E60MW3X0T2P"
+ *                 orderStatus:
+ *                   type: string
+ *                   example: "action_required"
+ *                 payment:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "PAY01HRYFXQ53Q3JPEC48MYWMR0TE"
+ *                     status:
+ *                       type: string
+ *                       example: "action_required"
+ *                     status_detail:
+ *                       type: string
+ *                       example: "waiting_transfer"
+ *                     qr_code:
+ *                       type: string
+ *                       description: Código PIX Copia e Cola
+ *                       example: "00020126580014br.gov.bcb.pix..."
+ *                     qr_code_base64:
+ *                       type: string
+ *                       description: Imagem QR Code em Base64
+ *                       example: "iVBORw0KGgoAAAANSUhEUgAABWQAAAVk..."
+ *                     ticket_url:
+ *                       type: string
+ *                       description: URL da página de pagamento
+ *                       example: "https://www.mercadopago.com.br/sandbox/payments/..."
+ *       400:
+ *         description: Dados obrigatórios não fornecidos ou inválidos
+ *       500:
+ *         description: Erro ao criar pagamento PIX
+ */
+router.post('/pix', controller.createPixPayment as RequestHandler);
+
+/**
+ * @swagger
+ * /payment-methods/payments/{id}/cancel:
+ *   post:
+ *     summary: Cancela um pagamento PIX pendente
+ *     description: Cancela um pagamento PIX que ainda não foi pago (status pending)
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do pagamento
+ *         example: "pay-uuid-123-456"
+ *     responses:
+ *       200:
+ *         description: Pagamento cancelado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 paymentId:
+ *                   type: string
+ *                   example: "pay-uuid-123-456"
+ *                 status:
+ *                   type: string
+ *                   example: "cancelled"
+ *       400:
+ *         description: Pagamento não pode ser cancelado (não está pendente)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 error:
+ *                   type: string
+ *                   example: "Pagamento não pode ser cancelado. Status atual: completed"
+ *       500:
+ *         description: Erro ao cancelar pagamento
+ */
+router.post('/:id/cancel', controller.cancelPixPayment as RequestHandler);
+
+/**
+ * @swagger
+ * /payment-methods/configure-webhook:
+ *   post:
+ *     summary: Configura webhook do Mercado Pago
+ *     description: Registra a URL de webhook no Mercado Pago para receber notificações de pagamentos
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Webhook configurado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: string
+ *                   example: "webhook-id-123"
+ *                 url:
+ *                   type: string
+ *                   example: "https://api.vendamaisagro.com.br/payment-methods/webhook"
+ *                 events:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       topic:
+ *                         type: string
+ *                         example: "payment"
+ *       500:
+ *         description: Erro ao configurar webhook
+ */
+router.post('/configure-webhook', controller.configureWebhook as RequestHandler);
 
 export default router;
