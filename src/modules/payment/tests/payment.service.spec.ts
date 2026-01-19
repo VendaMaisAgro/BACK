@@ -18,8 +18,7 @@ describe('PaymentService - cancelPixPayment', () => {
     jest.clearAllMocks();
   });
 
-  describe('cancelPixPayment', () => {
-    it('deve retornar erro quando o pagamento não for encontrado', async () => {
+  it('deve retornar erro quando o pagamento não for encontrado', async () => {
       const paymentId = 'non-existent-id';
       prismaMock.payment.findUnique = jest.fn().mockResolvedValue(null);
 
@@ -172,5 +171,4 @@ describe('PaymentService - cancelPixPayment', () => {
         }
       });
     });
-  });
 });
