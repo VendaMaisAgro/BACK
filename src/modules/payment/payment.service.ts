@@ -678,6 +678,8 @@ export class PaymentService {
                 return { error: "Payment não possui mp_order_id (não é um pagamento PIX)", success: false };
             }
 
+            const mpOrderId = paymentRecord.mp_order_id;
+
             // Verifica se o pagamento está em status que permite cancelamento
             if (paymentRecord.status !== 'pending') {
                 return {
@@ -690,7 +692,7 @@ export class PaymentService {
 
             // Cancela a order via API do Mercado Pago
             try {
-                await orderClient.cancel({ id: paymentRecord.mp_order_id! });
+                await orderClient.cancel({ id: mpOrderId });
             } catch (error: any) {
                 console.error(`[cancelPixPayment] Erro ao cancelar order no MP:`, error.message);
                 return { error: 'Erro ao cancelar order no Mercado Pago', message: error.message, success: false };
