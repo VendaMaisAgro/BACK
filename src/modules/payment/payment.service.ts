@@ -2,6 +2,7 @@ import { Payment, PrismaClient } from '@prisma/client';
 import { MercadoPagoConfig, Preference, Payment as MPPayment, PaymentMethod, Order } from 'mercadopago';
 import type { PaymentResponse } from 'mercadopago/dist/clients/payment/commonTypes';
 import { randomUUID } from 'crypto';
+import Decimal from 'decimal.js';
 import 'dotenv/config';
 
 const client = new MercadoPagoConfig({ accessToken: process.env.ACCESS_TOKEN || 'MERCADO_PAGO_ACCESS_TOKEN' });
@@ -109,6 +110,17 @@ export class PaymentService {
         try {
             console.info(`[createPixPayment] Criando pagamento PIX para venda ${params.saleId}`);
 
+            // Valida e converte o valor usando Decimal para evitar problemas de precisão
+            const decimalAmount = new Decimal(params.amount);
+            
+            // Valida que o valor tem no máximo 2 casas decimais
+            if (decimalAmount.decimalPlaces() > 2) {
+                throw new Error(`O valor do pagamento tem mais de 2 casas decimais: ${params.amount}`);
+            }
+
+            // Converte para string com exatamente 2 casas decimais para a API do Mercado Pago
+            const amountString = decimalAmount.toFixed(2);
+
             const expirationMinutes = params.expirationMinutes || 30;
             // Formato ISO 8601 para duração: PT30M = 30 minutos
             const expirationTime = `PT${expirationMinutes}M`;
@@ -120,13 +132,13 @@ export class PaymentService {
             const orderResponse = await orderClient.create({
                 body: {
                     type: 'online',
-                    total_amount: params.amount.toFixed(2),
+                    total_amount: amountString,
                     external_reference: params.saleId,
                     processing_mode: 'automatic',
                     transactions: {
                         payments: [
                             {
-                                amount: params.amount.toFixed(2),
+                                amount: amountString,
                                 payment_method: {
                                     id: 'pix',
                                     type: 'bank_transfer'
