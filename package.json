@@ -60,7 +60,7 @@
     "zod": "^4.0.5"
   },
   "devDependencies": {
-    "@prisma/client": "^6.16.2",
+    "@prisma/client": "^6.19.2",
     "@types/bcrypt": "^5.0.2",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.18",
@@ -78,7 +78,7 @@
     "jest": "^30.0.5",
     "jest-mock-extended": "^4.0.0",
     "nodemon": "^3.1.10",
-    "prisma": "^6.11.1",
+    "prisma": "^6.19.2",
     "ts-jest": "^29.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
