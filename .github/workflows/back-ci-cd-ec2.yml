@@ -2,7 +2,7 @@ name: BACK - CI/CD (EC2)
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "infra/ci-cd-back-ec2"]
     paths:
       - "**"
       - ".github/workflows/back-ci-cd-ec2.yml"
@@ -44,7 +44,7 @@ jobs:
     name: Deploy (SSH -> EC2)
     runs-on: ubuntu-latest
     needs: [ci]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/ci-cd-back-ec2') && github.event_name == 'push'
     steps:
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
@@ -56,7 +56,7 @@ jobs:
           script: |
             set -e
             export APP_DIR="${{ secrets.EC2_APP_DIR }}"
-            export BRANCH="main"
+            export BRANCH="${{ github.ref_name }}"
             export COMPOSE_FILE="docker-compose.prod.yml"
             export ENV_FILE=".env"
             bash "$APP_DIR/scripts/deploy-back.sh"
