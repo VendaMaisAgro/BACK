@@ -16,8 +16,6 @@ git fetch origin
 git checkout "$BRANCH"
 git pull --ff-only origin "$BRANCH"
 
-echo "==> Start database"
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d database
 
 echo "==> Prisma migrate deploy"
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" run --rm app npx prisma migrate deploy
