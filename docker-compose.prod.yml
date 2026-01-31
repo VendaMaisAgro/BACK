@@ -1,12 +1,9 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
+    image: ghcr.io/vendamaisagro/back:latest
     container_name: vendamais_backend
     env_file:
       - .env
     ports:
       - "5000:5000"
     restart: unless-stopped
-

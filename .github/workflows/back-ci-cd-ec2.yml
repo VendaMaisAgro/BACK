@@ -40,10 +40,38 @@ jobs:
           && npm run build \
           || npx tsc -p tsconfig.json
 
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: [ci]
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/ci-cd-back-ec2') && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.prod
+          push: true
+          tags: |
+            ghcr.io/vendamaisagro/back:latest
+            ghcr.io/vendamaisagro/back:${{ github.sha }}
+
   deploy:
     name: Deploy (SSH -> EC2)
     runs-on: ubuntu-latest
-    needs: [ci]
+    needs: [ci, build-and-push]
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/ci-cd-back-ec2') && github.event_name == 'push'
     steps:
       - name: Deploy on EC2
@@ -57,6 +85,5 @@ jobs:
             set -e
             export APP_DIR="${{ secrets.EC2_APP_DIR }}"
             export BRANCH="${{ github.ref_name }}"
-            export COMPOSE_FILE="docker-compose.prod.yml"
-            export ENV_FILE=".env"
+            export IMAGE_NAME="ghcr.io/vendamaisagro/back:latest"
             bash "$APP_DIR/scripts/deploy-back.sh"
