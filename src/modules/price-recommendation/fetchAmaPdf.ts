@@ -1,9 +1,13 @@
 import puppeteer from 'puppeteer';
-import axios     from 'axios';
+import axios from 'axios';
 
 export async function fetchTodayCotacaoPdf(): Promise<string | null> {
-  const browser = await puppeteer.launch({ headless: true });
-  const page    = await browser.newPage();
+  const browser = await puppeteer.launch({
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'], // Safe defaults for Docker
+  });
+  const page = await browser.newPage();
   const listUrl =
     'https://www.juazeiro.ba.gov.br/category/autarquia-municipal-de-abastecimento-ama/';
 
@@ -13,7 +17,7 @@ export async function fetchTodayCotacaoPdf(): Promise<string | null> {
   const cotacaoUrl = await page.evaluate(() => {
     const regex = /cotação/i;
     const a = Array.from(document.querySelectorAll<HTMLAnchorElement>('a'))
-                   .find(x => regex.test(x.textContent || ''));
+      .find(x => regex.test(x.textContent || ''));
     return a?.href || null;
   });
   if (!cotacaoUrl) {
@@ -28,7 +32,7 @@ export async function fetchTodayCotacaoPdf(): Promise<string | null> {
     return Array.from(document.querySelectorAll<HTMLAnchorElement>('a'))
       .map(a => a.href)
       .filter(h => /\.pdf(\?.*)?$/i.test(h) &&
-                  h.includes('/wp-content/uploads/'));
+        h.includes('/wp-content/uploads/'));
   });
 
   await browser.close();

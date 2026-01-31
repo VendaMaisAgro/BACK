@@ -49,6 +49,7 @@ async function ocrBuffer(buf: Buffer, scale = 3): Promise<string> {
 export async function collectAgrolinkJuazeiro(url: string = URL_DEFAULT) {
   const browser: Browser = await puppeteer.launch({
     headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
     defaultViewport: { width: 1280, height: 1200, deviceScaleFactor: 3 },
   });

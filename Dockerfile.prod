@@ -2,6 +2,9 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
+# Otimização: Não baixar Chromium no build (economiza ~300MB)
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -17,6 +20,19 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
+# Instalar Chromium do Alpine
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
+
+# Dizer pro Puppeteer onde está o Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
