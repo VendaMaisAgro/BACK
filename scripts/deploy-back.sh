@@ -18,6 +18,9 @@ git pull --ff-only origin "$BRANCH"
 echo "==> Pull latest Docker image"
 docker pull "$IMAGE_NAME"
 
+echo "==> Resolve failed migrations (if any)"
+docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate resolve --applied 20251020152709_add_seller_approved_to_sale || true
+
 echo "==> Prisma migrate deploy"
 docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate deploy
 
