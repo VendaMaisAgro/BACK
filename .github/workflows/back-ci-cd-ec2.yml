@@ -82,8 +82,34 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT }}
           script: |
-            set -e
-            export APP_DIR="${{ secrets.EC2_APP_DIR }}"
-            export BRANCH="${{ github.ref_name }}"
-            export IMAGE_NAME="ghcr.io/vendamaisagro/back:latest"
-            bash "$APP_DIR/scripts/deploy-back.sh"
+            set -euo pipefail
+            
+            APP_DIR="${{ secrets.EC2_APP_DIR }}"
+            IMAGE_NAME="ghcr.io/vendamaisagro/back:latest"
+            
+            echo "==> Deploy starting..."
+            echo "APP_DIR=$APP_DIR | IMAGE=$IMAGE_NAME"
+            
+            cd "$APP_DIR"
+            
+            # Git update removido - imagem Docker já contém o código
+            
+            echo "==> Pull latest Docker image"
+            docker pull "$IMAGE_NAME"
+            
+            echo "==> Resolve failed migrations (if any)"
+            docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate resolve --applied 20251020152709_add_seller_approved_to_sale || true
+            
+            echo "==> Prisma migrate deploy"
+            docker compose -f docker-compose.prod.yml run --rm app npx prisma migrate deploy
+            
+            echo "==> Start app"
+            docker compose -f docker-compose.prod.yml up -d app
+            
+            echo "==> Cleanup old images"
+            docker image prune -f || true
+            
+            echo "==> Status"
+            docker compose -f docker-compose.prod.yml ps
+            
+            echo "==> Deploy finished."
