@@ -21,22 +21,30 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Instalar Chromium do Alpine
+# Instalar apenas Chromium essencial (otimizado)
 RUN apk add --no-cache \
     chromium \
     nss \
     freetype \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont
+    ca-certificates
 
 # Dizer pro Puppeteer onde está o Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
+# Copiar package files
 COPY --from=build /app/package.json /app/package-lock.json ./
-COPY --from=build /app/node_modules ./node_modules
+
+# Copiar apenas prisma (sem node_modules ainda)
 COPY --from=build /app/prisma ./prisma
+
+# Instalar APENAS dependências de produção (sem devDependencies)
+# Isso reduz ~500MB removendo TypeScript, ESLint, @types/*, etc
+RUN npm ci --omit=dev --ignore-scripts && \
+    npx prisma generate && \
+    npm cache clean --force
+
+# Copiar código compilado
 COPY --from=build /app/dist ./dist
 
 EXPOSE 5000
