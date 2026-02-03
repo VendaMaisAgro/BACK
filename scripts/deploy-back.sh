@@ -10,10 +10,11 @@ echo "APP_DIR=$APP_DIR | BRANCH=$BRANCH | IMAGE=$IMAGE_NAME"
 
 cd "$APP_DIR"
 
-echo "==> Git update"
-git fetch origin
-git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
+# Git update não é mais necessário - a imagem Docker já contém o código
+# echo "==> Git update"
+# git fetch origin
+# git checkout "$BRANCH"
+# git pull --ff-only origin "$BRANCH"
 
 echo "==> Pull latest Docker image"
 docker pull "$IMAGE_NAME"
