@@ -21,10 +21,11 @@ AVAILABLE_SPACE=$(df / | tail -1 | awk '{print $4}')
 echo "Available space: ${AVAILABLE_SPACE}KB"
 
 # Preventive cleanup to ensure space for new image
-echo "==> Preventive cleanup (before pull)"
-docker container prune -f || true
-docker image prune -f || true
-docker image prune -a -f --filter "until=24h" || true
+echo "==> Stop running containers to free space"
+docker compose -f docker-compose.prod.yml down || true
+
+echo "==> Aggressive cleanup before pull (prevent disk full)"
+docker system prune -a -f --volumes || true
 
 echo "==> Pull latest Docker image"
 docker pull "$IMAGE_NAME"
