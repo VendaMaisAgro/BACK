@@ -35,14 +35,15 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 # Copiar package files
 COPY --from=build /app/package.json /app/package-lock.json ./
 
-# Copiar apenas prisma (sem node_modules ainda)
-COPY --from=build /app/prisma ./prisma
-
 # Instalar APENAS dependências de produção (sem devDependencies)
 # Isso reduz ~500MB removendo TypeScript, ESLint, @types/*, etc
-RUN npm ci --omit=dev --ignore-scripts && \
-    npx prisma generate && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
+
+# Copiar Prisma schema e Client já gerado do build stage
+COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
 
 # Copiar código compilado
 COPY --from=build /app/dist ./dist
