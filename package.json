@@ -29,7 +29,6 @@
     "@mercadopago/sdk-js": "^0.0.3",
     "@nestjs/jwt": "^11.0.0",
     "@nestjs/passport": "^11.0.5",
-    "aws-sdk": "^2.1692.0",
     "axios": "^1.11.0",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.2",

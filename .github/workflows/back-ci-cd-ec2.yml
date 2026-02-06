@@ -84,7 +84,7 @@ jobs:
           script: |
             set -euo pipefail
             
-            APP_DIR="${{ secrets.EC2_APP_DIR }}"
+            APP_DIR="${APP_DIR:-/home/ubuntu/BACK}"
             IMAGE_NAME="ghcr.io/vendamaisagro/back:latest"
             
             echo "==> Deploy starting..."
@@ -93,6 +93,15 @@ jobs:
             cd "$APP_DIR"
             
             # Git update removido - imagem Docker já contém o código
+            
+            echo "==> Check disk space"
+            df -h /
+            docker system df || true
+            
+            echo "==> Preventive cleanup (before pull)"
+            docker container prune -f || true
+            docker image prune -f || true
+            docker image prune -a -f --filter "until=24h" || true
             
             echo "==> Pull latest Docker image"
             docker pull "$IMAGE_NAME"
@@ -106,8 +115,11 @@ jobs:
             echo "==> Start app"
             docker compose -f docker-compose.prod.yml up -d app
             
-            echo "==> Cleanup old images"
-            docker image prune -f || true
+            echo "==> Cleanup old images and containers"
+            docker container prune -f || true
+            docker image prune -a -f || true
+            docker volume prune -f || true
+            docker builder prune -f || true
             
             echo "==> Status"
             docker compose -f docker-compose.prod.yml ps

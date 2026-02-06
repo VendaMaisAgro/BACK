@@ -18,14 +18,35 @@ cd "$APP_DIR"
 
 echo "==> Check disk space"
 AVAILABLE_SPACE=$(df / | tail -1 | awk '{print $4}')
-echo "Available space: ${AVAILABLE_SPACE}KB"
+AVAILABLE_GB=$((AVAILABLE_SPACE / 1024 / 1024))
+echo "Available space: ${AVAILABLE_GB}GB (${AVAILABLE_SPACE}KB)"
 
-# Preventive cleanup to ensure space for new image
+# Abort if < 3GB available (need ~2GB for image pull + headroom)
+if [ "$AVAILABLE_GB" -lt 3 ]; then
+    echo "ERROR: Insufficient disk space (${AVAILABLE_GB}GB < 3GB minimum required)"
+    echo "CRITICAL: Run emergency cleanup: ./scripts/emergency-disk-cleanup.sh"
+    echo "Or contact DevOps to expand EBS volume"
+    exit 1
+fi
+
+# AGGRESSIVE preventive cleanup to ensure space for new image
 echo "==> Stop running containers to free space"
 docker compose -f docker-compose.prod.yml down || true
 
 echo "==> Aggressive cleanup before pull (prevent disk full)"
+# Remove stopped containers
+docker container prune -f || true
+# Remove old/unused images (tagged and untagged)
+docker image prune -a -f || true
+# Remove unused volumes
+docker volume prune -f || true
+# Remove build cache
+docker builder prune -a -f || true
+# Final aggressive prune
 docker system prune -a -f --volumes || true
+
+echo "==> Disk space after cleanup:"
+df -h / | grep -v Filesystem
 
 echo "==> Pull latest Docker image"
 docker pull "$IMAGE_NAME"
