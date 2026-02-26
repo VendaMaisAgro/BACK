@@ -12,10 +12,10 @@ export const protectRoute = (req: Request, res: Response, next: NextFunction) =>
 
     const token = authHeader.split(' ')[1];
 
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: number; email: string };
-    
-    req.user = decoded;
-    
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+
+    req.user = { userId: decoded.id, email: decoded.email };
+
     next();
   } catch (error) {
     return res.status(401).json({ error: 'Unauthorized - Invalid token' });

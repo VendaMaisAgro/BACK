@@ -7,8 +7,8 @@ const controller = new ContractController();
 
 const wrap =
   (fn: (req: Request, res: Response) => Promise<any> | void) =>
-  (req: Request, res: Response, next: NextFunction) =>
-    Promise.resolve(fn(req, res)).catch(next);
+    (req: Request, res: Response, next: NextFunction) =>
+      Promise.resolve(fn(req, res)).catch(next);
 
 /**
  * @swagger
@@ -141,7 +141,7 @@ const wrap =
  *         name: saleId
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
@@ -176,7 +176,7 @@ router.post('/:saleId/checkout/buyer', protectRoute, wrap(controller.buyerAccept
  *         name: saleId
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *     requestBody:
  *       required: true
  *       content:
@@ -211,7 +211,7 @@ router.post('/:saleId/checkout/seller', protectRoute, wrap(controller.sellerAcce
  *         name: saleId
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *     responses:
  *       200:
  *         description: Status dos aceites (multi-seller)
@@ -238,7 +238,7 @@ router.get('/:saleId/checkout/status', protectRoute, wrap(controller.statusBySal
  *         name: saleId
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *       - in: query
  *         name: kind
  *         required: false
@@ -257,7 +257,7 @@ router.get('/:saleId/checkout/status', protectRoute, wrap(controller.statusBySal
  *         required: false
  *         description: Obrigatório quando a venda possuir itens de múltiplos vendedores.
  *         schema:
- *           type: integer
+ *           type: string
  *     responses:
  *       200:
  *         description: Contrato resolvido
@@ -286,7 +286,7 @@ router.get('/:saleId/contract', protectRoute, wrap(controller.contractBySale.bin
  *         name: saleId
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *       - in: query
  *         name: kind
  *         required: false
@@ -305,7 +305,7 @@ router.get('/:saleId/contract', protectRoute, wrap(controller.contractBySale.bin
  *         required: false
  *         description: Obrigatório quando a venda possuir itens de múltiplos vendedores.
  *         schema:
- *           type: integer
+ *           type: string
  *     responses:
  *       200:
  *         description: PDF inline
