@@ -15,7 +15,7 @@ export class UserService {
     this.uploadService = new UploadS3Service(this.prisma);
   }
 
-  public async create(data: any, file?: Express.Multer.File): Promise<User> {
+  public async create(data: any): Promise<User> {
     const { name, phone_number, email, password, role, cpf, cnpj, ccir, securityQuestions } = data;
 
     if (!name || !phone_number || !email || !password || !role) {
@@ -68,12 +68,6 @@ export class UserService {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    let imageUrl: string | null = null;
-    if (file) {
-      const { publicUrl } = await this.uploadService.upload(file);
-      imageUrl = publicUrl;
-    }
-
     const securityQuestionsData = securityQuestions
       ? {
         create: {
@@ -94,7 +88,7 @@ export class UserService {
           role,
           cpf: cpf ? formatToCPF(cpf) : null,
           cnpj: cnpj ? formatToCNPJ(cnpj) : null,
-          img: imageUrl,
+          img: null,
           ccir: ccir || null,
           securityQuestions: securityQuestionsData,
         },
