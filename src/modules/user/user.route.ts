@@ -10,7 +10,7 @@ const upload = multer({
   limits: {
     fileSize: 10 * 1024 * 1024,
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -31,21 +31,64 @@ const upload = multer({
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [name, email, phone_number, password, role, securityQuestions]
  *             properties:
+ *               name:
+ *                 type: string
+ *                 example: João Silva
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: joao@email.com
+ *               phone_number:
+ *                 type: string
+ *                 example: "11999999999"
+ *               password:
+ *                 type: string
+ *                 description: Mínimo 8 caracteres, com maiúscula, minúscula, número e caractere especial
+ *                 example: Senha@123
  *               role:
  *                 type: string
  *                 enum: [buyer, producer]
  *               cpf:
  *                 type: string
+ *                 description: Obrigatório se não informar cnpj
+ *                 example: "52998224725"
  *               cnpj:
  *                 type: string
+ *                 description: Obrigatório se não informar cpf
+ *                 example: "11222333000181"
+ *               ccir:
+ *                 type: string
+ *                 example: "12345678"
+ *               securityQuestions:
+ *                 type: object
+ *                 required: [answer_1, answer_2, answer_3]
+ *                 properties:
+ *                   answer_1:
+ *                     type: string
+ *                     example: Rex
+ *                   answer_2:
+ *                     type: string
+ *                     example: Florianópolis
+ *                   answer_3:
+ *                     type: string
+ *                     example: Maria
  *     responses:
  *       201:
- *         description: Usuário criado com sucesso
+ *         description: Usuário cadastrado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Usuário cadastrado com sucesso!
  *       400:
- *         description: Dados inválidos
+ *         description: Dados inválidos ou duplicados (e-mail, CPF ou CNPJ já cadastrado)
  */
-router.post("/register", upload.single("img"), controller.createHandler);
+router.post("/register", controller.createHandler);
 
 /**
  * @swagger

@@ -8,19 +8,8 @@ const service = new UserService(prisma);
 export class UserController {
   public async createHandler(req: Request, res: Response): Promise<void> {
     try {
-      let data = { ...req.body };
-
-      if (typeof data.securityQuestions === 'string') {
-        try {
-          data.securityQuestions = JSON.parse(data.securityQuestions);
-        } catch (error) {
-          res.status(400).json({ error: 'securityQuestions deve ser um JSON válido' });
-          return;
-        }
-      }
-
-      const user = await service.create(data, req.file);
-      res.status(201).json(user);
+      await service.create(req.body);
+      res.status(201).json({ message: 'Usuário cadastrado com sucesso!' });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
