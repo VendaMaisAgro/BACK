@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ContractController } from './contract.controller';
 import { protectRoute } from '../../middlewares/auth.middleware';
+import { requireAddress } from '../../middlewares/requireAddress.middleware';
 
 const router = Router();
 const controller = new ContractController();
@@ -160,7 +161,7 @@ const wrap =
  *       409:
  *         description: Aceite já existente para BUYER
  */
-router.post('/:saleId/checkout/buyer', protectRoute, wrap(controller.buyerAccept.bind(controller)));
+router.post('/:saleId/checkout/buyer', protectRoute, requireAddress, wrap(controller.buyerAccept.bind(controller)));
 
 /**
  * @swagger

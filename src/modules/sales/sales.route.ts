@@ -1,6 +1,7 @@
 import express from "express";
 import { SaleController } from "./sales.controller";
 import { protectRoute } from "../../middlewares/auth.middleware";
+import { requireAddress } from "../../middlewares/requireAddress.middleware";
 import { RequestHandler } from "express";
 
 const router = express.Router();
@@ -94,7 +95,7 @@ router.use(protectRoute as RequestHandler);
  *           items:
  *             $ref: '#/components/schemas/BoughtProduct'
  */
-router.post("/", controller.create as RequestHandler);
+router.post("/", requireAddress as RequestHandler, controller.create as RequestHandler);
 
 /**
  * @swagger
