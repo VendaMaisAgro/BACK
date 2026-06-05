@@ -14,6 +14,7 @@
     "seed-units": "ts-node scripts/seed-selling-units.ts",
     "seed-sales": "ts-node scripts/seed-sales-data.ts",
     "seed": "prisma db seed",
+    "pretest": "test -f .env.test || (echo '\\nERRO: Arquivo .env.test não encontrado.\\nTestes não podem rodar sem um banco de dados dedicado para testes.\\nCrie o .env.test com a DATABASE_URL do banco de testes antes de continuar.\\n' && exit 1)",
     "test": "jest"
   },
   "prisma": {

@@ -1,5 +1,14 @@
 node_modules
-# Keep environment variables out of version control
+dist
+
+# Environment variables
 .env
 .env.docker
-dist
+.env.test
+
+# Test files — local only, never deployed
+**/*.spec.ts
+**/tests/
+src/__mocks__/
+jest.config.js
+coverage/
