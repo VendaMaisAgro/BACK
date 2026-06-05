@@ -219,6 +219,10 @@ export class SellingUnitProductService {
     }
   }
 
+  async getAllSellingUnits() {
+    return prisma.sellingUnit.findMany({ orderBy: { title: 'asc' } });
+  }
+
   async deleteByProductId(productId: string) {
     try {
       const product = await prisma.product.findUnique({

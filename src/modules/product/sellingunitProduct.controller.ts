@@ -189,4 +189,13 @@ export class SellingUnitProductController {
       res.status(500).json({ error: "Erro interno do servidor ao deletar unidades de venda do produto" });
     }
   }
+
+  async getAllSellingUnits(req: Request, res: Response) {
+    try {
+      const result = await service.getAllSellingUnits();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: "Erro interno do servidor ao listar unidades de venda" });
+    }
+  }
 }
