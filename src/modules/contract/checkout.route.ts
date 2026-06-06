@@ -142,6 +142,7 @@ const wrap =
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *     requestBody:
  *       required: true
  *       content:
@@ -177,6 +178,7 @@ router.post('/:saleId/checkout/buyer', protectRoute, wrap(controller.buyerAccept
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *     requestBody:
  *       required: true
  *       content:
@@ -212,6 +214,7 @@ router.post('/:saleId/checkout/seller', protectRoute, wrap(controller.sellerAcce
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *     responses:
  *       200:
  *         description: Status dos aceites (multi-seller)
@@ -239,6 +242,7 @@ router.get('/:saleId/checkout/status', protectRoute, wrap(controller.statusBySal
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *       - in: query
  *         name: kind
  *         required: false
@@ -258,6 +262,7 @@ router.get('/:saleId/checkout/status', protectRoute, wrap(controller.statusBySal
  *         description: Obrigatório quando a venda possuir itens de múltiplos vendedores.
  *         schema:
  *           type: string
+ *           format: uuid
  *     responses:
  *       200:
  *         description: Contrato resolvido
@@ -287,6 +292,7 @@ router.get('/:saleId/contract', protectRoute, wrap(controller.contractBySale.bin
  *         required: true
  *         schema:
  *           type: string
+ *           format: uuid
  *       - in: query
  *         name: kind
  *         required: false
@@ -306,6 +312,7 @@ router.get('/:saleId/contract', protectRoute, wrap(controller.contractBySale.bin
  *         description: Obrigatório quando a venda possuir itens de múltiplos vendedores.
  *         schema:
  *           type: string
+ *           format: uuid
  *     responses:
  *       200:
  *         description: PDF inline

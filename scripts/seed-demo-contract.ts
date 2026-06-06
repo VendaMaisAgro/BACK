@@ -11,6 +11,11 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
+if (process.env.NODE_ENV === 'production') {
+  console.error('❌ Seed de demo não pode ser executado em produção.');
+  process.exit(1);
+}
+
 const prisma = new PrismaClient();
 
 function sha256(input: string) {
