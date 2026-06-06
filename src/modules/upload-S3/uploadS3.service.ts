@@ -5,7 +5,7 @@ import {
   DeleteObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
-import { v4 as uuid } from "uuid";
+import { randomUUID } from "crypto";
 
 export class UploadS3Service {
   private readonly prisma: PrismaClient;
@@ -27,7 +27,7 @@ export class UploadS3Service {
   }> {
     if (!file) throw new Error("Arquivo não enviado");
 
-    const key = `${uuid()}-${file.originalname.replace(/\s+/g, '-')}`;
+    const key = `${randomUUID()}-${file.originalname.replace(/\s+/g, '-')}`;
 
     await this.s3Client.send(
       new PutObjectCommand({
