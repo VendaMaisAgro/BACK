@@ -13,6 +13,17 @@ export interface CreateSaleDataDto {
   paymentMethodId: string;
   buyerId: string;
   paymentCompleted?: boolean;
+  // Campos do contrato de intermediação
+  sellerProfile?: string;       // "PRODUTOR" | "COOPERATIVA_ASSOCIACAO_DISTRIBUIDOR"
+  packagingType?: string;
+  paymentType?: string;         // "A_VISTA" | "A_PRAZO"
+  paymentTermDays?: number;
+  downPaymentPercent?: number;
+  plannedHarvestDate?: Date;
+  plannedPickupDate?: Date;
+  plannedDeliveryDate?: Date;
+  technicalSpec?: string;
+  certifierRequired?: boolean;
   boughtProducts: {
     productId: string;
     sellingUnitProductId: string;
@@ -36,6 +47,17 @@ export interface UpdateSaleDataDto {
   paymentMethodId?: string;
   buyerId?: string;
   paymentCompleted?: boolean;
+  // Campos do contrato de intermediação
+  sellerProfile?: string;
+  packagingType?: string;
+  paymentType?: string;
+  paymentTermDays?: number;
+  downPaymentPercent?: number;
+  plannedHarvestDate?: Date;
+  plannedPickupDate?: Date;
+  plannedDeliveryDate?: Date;
+  technicalSpec?: string;
+  certifierRequired?: boolean;
   boughtProducts?: {
     productId: string;
     sellingUnitProductId: string;
