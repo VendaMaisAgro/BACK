@@ -204,4 +204,112 @@ router.post('/accept', protectRoute, wrap(controller.accept.bind(controller)));
  */
 router.get('/accept/status/:saleId', protectRoute, wrap(controller.statusBySale.bind(controller)));
 
+/**
+ * @swagger
+ * /contract/sale/{saleId}/context:
+ *   get:
+ *     summary: Retorna os dados da venda para preenchimento do contrato no front-end
+ *     tags:
+ *       - Contract
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: saleId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sellerId
+ *         schema:
+ *           type: string
+ *         description: Obrigatório quando a venda tem múltiplos vendedores
+ *     responses:
+ *       200:
+ *         description: Contexto da venda (comprador, vendedor, itens, condições)
+ *       400:
+ *         description: sellerId obrigatório para múltiplos vendedores
+ *       404:
+ *         description: Venda não encontrada
+ */
+router.get('/sale/:saleId/context', protectRoute, wrap(controller.saleContext.bind(controller)));
+
+/**
+ * @swagger
+ * /contract/sale/{saleId}/accept/buyer:
+ *   post:
+ *     summary: Registra aceite do comprador para uma venda
+ *     tags:
+ *       - Contract
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: saleId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - accepted
+ *             properties:
+ *               accepted:
+ *                 type: boolean
+ *               contractId:
+ *                 type: string
+ *                 description: Opcional — se omitido usa o contrato mais recente do tipo da venda
+ *     responses:
+ *       201:
+ *         description: Aceite registrado
+ *       403:
+ *         description: Usuário não é o comprador desta venda
+ *       409:
+ *         description: Aceite duplicado
+ */
+router.post('/sale/:saleId/accept/buyer', protectRoute, wrap(controller.buyerAccept.bind(controller)));
+
+/**
+ * @swagger
+ * /contract/sale/{saleId}/accept/seller:
+ *   post:
+ *     summary: Registra aceite do vendedor para uma venda
+ *     tags:
+ *       - Contract
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: saleId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - accepted
+ *             properties:
+ *               accepted:
+ *                 type: boolean
+ *               contractId:
+ *                 type: string
+ *                 description: Opcional — se omitido usa o contrato mais recente do tipo da venda
+ *     responses:
+ *       201:
+ *         description: Aceite registrado
+ *       403:
+ *         description: Usuário não é vendedor desta venda
+ *       409:
+ *         description: Aceite duplicado
+ */
+router.post('/sale/:saleId/accept/seller', protectRoute, wrap(controller.sellerAccept.bind(controller)));
+
 export default router;

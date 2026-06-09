@@ -14,6 +14,9 @@ async function seedSalesData() {
       console.log('Inserindo métodos de pagamento básicos...');
       const paymentMethods = [
         { method: 'PIX' },
+        { method: 'Cartão de Crédito' },
+        { method: 'Cartão de Débito' },
+        { method: 'Boleto' },
       ];
 
       const createdPaymentMethods = await prisma.paymentMethod.createMany({

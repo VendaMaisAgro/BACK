@@ -12,7 +12,8 @@ function parseKind(input: unknown): ContractKind | undefined {
     key === 'privacy_policy' ||
     key === 'sale_intermediation_cpf' ||
     key === 'sale_intermediation_cnpj' ||
-    key === 'quality_agent_ps'
+    key === 'quality_agent_ps' ||
+    key === 'sale_intermediation'
   ) return key as ContractKind;
   return undefined;
 }
@@ -278,6 +279,26 @@ export class ContractController {
       }
       console.error(err);
       return res.status(500).json({ message: 'Erro ao gerar contrato da venda' });
+    }
+  }
+
+  async saleContext(req: Request, res: Response) {
+    try {
+      const saleId = String(req.params.saleId);
+      if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
+
+      const sellerId = req.query.sellerId ? String(req.query.sellerId) : undefined;
+      const ctx = await service.getSaleRawContext(saleId, sellerId);
+      return res.json(ctx);
+    } catch (err: any) {
+      if (err?.message === 'SALE_NOT_FOUND') {
+        return res.status(404).json({ message: 'Venda não encontrada' });
+      }
+      if (err?.message === 'MULTIPLE_SELLERS_REQUIRE_ID') {
+        return res.status(400).json({ message: 'sellerId é obrigatório para vendas com múltiplos vendedores' });
+      }
+      console.error(err);
+      return res.status(500).json({ message: 'Erro ao buscar contexto da venda' });
     }
   }
 

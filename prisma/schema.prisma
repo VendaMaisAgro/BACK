@@ -26,6 +26,7 @@ enum ContractKind {
   sale_intermediation_cpf
   sale_intermediation_cnpj
   quality_agent_ps
+  sale_intermediation
 }
 
 model User {
@@ -51,7 +52,8 @@ model User {
   sellerStats SellerStats?
   Cart        Cart[]
 
-  acceptances ContractAcceptance[]
+  acceptances        ContractAcceptance[]
+  operationDocuments OperationDocument[]
 }
 
 model Address {
@@ -154,6 +156,7 @@ model TransportTypes {
 
 model SaleData {
   id               String    @id @default(uuid())
+  orderNumber      Int       @default(autoincrement()) @unique @map("order_number")
   transportTypeId  String
   createdAt        DateTime? @default(now())
   shippedAt        DateTime?
@@ -178,6 +181,19 @@ model SaleData {
 
   cargoWeightKg Decimal? @map("cargo_weight_kg") @db.Decimal(10, 2)
 
+  sellerProfile       String?   @map("seller_profile")
+  packagingType       String?   @map("packaging_type")
+  paymentType         String?   @map("payment_type")
+  paymentTermDays     Int?      @map("payment_term_days")
+  downPaymentPercent  Int?      @map("down_payment_percent")
+  plannedHarvestDate  DateTime? @map("planned_harvest_date")
+  plannedPickupDate   DateTime? @map("planned_pickup_date")
+  plannedDeliveryDate DateTime? @map("planned_delivery_date")
+  technicalSpec       String?   @map("technical_spec")
+  certifierRequired   Boolean?  @map("certifier_required")
+
+  conformityCertifier ConformityCertifier?
+  operationDocuments  OperationDocument[]
 }
 
 model BoughtProduct {
@@ -277,6 +293,33 @@ model Contract {
 
   @@unique([kind, version])
   @@index([kind, createdAt])
+}
+
+model ConformityCertifier {
+  id           String    @id @default(uuid())
+  saleId       String    @unique @map("sale_id")
+  agentName    String?   @map("agent_name")
+  agentCompany String?   @map("agent_company")
+  agentContact String?   @map("agent_contact")
+  status       String    @default("PENDING")
+  reportUrl    String?   @map("report_url")
+  reportedAt   DateTime? @map("reported_at")
+  costValue    Decimal?  @map("cost_value") @db.Decimal(10, 2)
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  sale SaleData @relation(fields: [saleId], references: [id])
+}
+
+model OperationDocument {
+  id           String   @id @default(uuid())
+  saleId       String   @map("sale_id")
+  uploadedById String   @map("uploaded_by_id")
+  docType      String   @map("doc_type")
+  fileUrl      String   @map("file_url")
+  uploadedAt   DateTime @default(now()) @map("uploaded_at")
+
+  sale       SaleData @relation(fields: [saleId], references: [id])
+  uploadedBy User     @relation(fields: [uploadedById], references: [id])
 }
 
 model ContractAcceptance {

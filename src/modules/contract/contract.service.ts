@@ -8,7 +8,8 @@ export type ContractKind =
   | 'privacy_policy'
   | 'sale_intermediation_cpf'
   | 'sale_intermediation_cnpj'
-  | 'quality_agent_ps';
+  | 'quality_agent_ps'
+  | 'sale_intermediation';
 
 const prisma = new PrismaClient();
 
@@ -113,14 +114,19 @@ export class ContractService {
     return prisma.contract.create({ data: { content, version, kind: kind as any, sha256Hash } });
   }
 
-  /** Escolha automática (CPF/CNPJ) para contratos de venda */
+  /** Escolha automática do tipo de contrato para uma venda */
   async pickDefaultSaleContractKind(saleId: string): Promise<ContractKind> {
-    const sale = await prisma.saleData.findUnique({
-      where: { id: saleId },
-      include: { buyer: true },
-    });
+    const sale = await prisma.saleData.findUnique({ where: { id: saleId } });
     if (!sale) throw new Error('SALE_NOT_FOUND');
-    const isPJ = Boolean(sale.buyer?.cnpj && sale.buyer.cnpj.trim() !== '');
+
+    const hasIntermediation = await prisma.contract.findFirst({
+      where: { kind: 'sale_intermediation' as any },
+    });
+    if (hasIntermediation) return 'sale_intermediation';
+
+    const isPJ = Boolean(
+      (sale as any).buyer?.cnpj && (sale as any).buyer.cnpj.trim() !== ''
+    );
     return isPJ ? 'sale_intermediation_cnpj' : 'sale_intermediation_cpf';
   }
 
@@ -199,13 +205,14 @@ export class ContractService {
     const sale = await prisma.saleData.findUnique({
       where: { id: saleId },
       include: {
-        buyer: true,
+        buyer: { include: { addresses: true } },
         boughtProducts: {
           include: {
             product: true,
             sellingUnitProduct: { include: { unit: true } },
           },
         },
+        conformityCertifier: true,
       },
     });
 
@@ -231,6 +238,7 @@ export class ContractService {
       const total = unitPrice * amount;
       return {
         productName: bp.product?.name ?? '',
+        variety: bp.product?.variety ?? '',
         unitTitle,
         unit,
         amount,
@@ -245,14 +253,37 @@ export class ContractService {
     };
     const grand = totals.items + totals.freight;
 
-    const sellerUser =
-      sellerId ? await prisma.user.findUnique({ where: { id: sellerId } }) : undefined;
+    const sellerUser = sellerId
+      ? await prisma.user.findUnique({
+          where: { id: sellerId },
+          include: { addresses: true },
+        })
+      : undefined;
+
+    const buyerDefaultAddress = sale.buyer?.addresses?.find(a => a.default) ?? sale.buyer?.addresses?.[0];
+    const sellerDefaultAddress = (sellerUser as any)?.addresses?.find((a: any) => a.default) ?? (sellerUser as any)?.addresses?.[0];
+
+    const formatAddress = (addr: any) =>
+      addr ? `${addr.street}, ${addr.number}${addr.complement ? ` - ${addr.complement}` : ''}, ${addr.city} - ${addr.uf}, CEP ${addr.cep}` : '';
+
+    const saleExtra = sale as any;
 
     return {
       sale: {
         id: sale.id,
         createdAt: sale.createdAt,
         status: sale.status,
+        sellerProfile: saleExtra.sellerProfile ?? '',
+        packagingType: saleExtra.packagingType ?? '',
+        paymentType: saleExtra.paymentType ?? '',
+        paymentTermDays: saleExtra.paymentTermDays ?? null,
+        downPaymentPercent: saleExtra.downPaymentPercent ?? null,
+        plannedHarvestDate: saleExtra.plannedHarvestDate ?? null,
+        plannedPickupDate: saleExtra.plannedPickupDate ?? null,
+        plannedDeliveryDate: saleExtra.plannedDeliveryDate ?? null,
+        technicalSpec: saleExtra.technicalSpec ?? '',
+        certifierRequired: saleExtra.certifierRequired ?? null,
+        cargoWeightKg: saleExtra.cargoWeightKg ?? null,
       },
       buyer: {
         id: sale.buyerId,
@@ -260,23 +291,44 @@ export class ContractService {
         email: sale.buyer?.email ?? '',
         cpf: sale.buyer?.cpf ?? '',
         cnpj: sale.buyer?.cnpj ?? '',
+        phone: sale.buyer?.phone_number ?? '',
+        address: formatAddress(buyerDefaultAddress),
       },
       seller: sellerUser
         ? {
-          id: sellerUser.id,
-          name: sellerUser.name ?? '',
-          email: sellerUser.email ?? '',
-          cpf: sellerUser.cpf ?? '',
-          cnpj: sellerUser.cnpj ?? '',
-        }
+            id: sellerUser.id,
+            name: sellerUser.name ?? '',
+            email: sellerUser.email ?? '',
+            cpf: sellerUser.cpf ?? '',
+            cnpj: sellerUser.cnpj ?? '',
+            phone: sellerUser.phone_number ?? '',
+            address: formatAddress(sellerDefaultAddress),
+          }
         : undefined,
+      certifier: sale.conformityCertifier
+        ? {
+            agentName: sale.conformityCertifier.agentName ?? '',
+            agentCompany: sale.conformityCertifier.agentCompany ?? '',
+            agentContact: sale.conformityCertifier.agentContact ?? '',
+            status: sale.conformityCertifier.status,
+            reportUrl: sale.conformityCertifier.reportUrl ?? '',
+            costValue: sale.conformityCertifier.costValue ?? null,
+          }
+        : null,
       items,
       totals: { ...totals, grand },
       'items.list': items
-        .map(it => `- ${it.productName} x ${it.amount} ${it.unitTitle || it.unit || ''} = ${it.total.toFixed(2)}`)
+        .map(it => `- ${it.productName} (${it.variety}) x ${it.amount} ${it.unitTitle || it.unit || ''} = R$ ${it.total.toFixed(2)}`)
         .join('\n'),
       meta: { sellers },
     };
+  }
+
+  /** Retorna o contexto cru da venda para o front-end preencher o template do contrato */
+  async getSaleRawContext(saleId: string, sellerId?: string) {
+    const ctx = await this.getSaleContext(saleId, sellerId);
+    if (!ctx) throw new Error('SALE_NOT_FOUND');
+    return ctx;
   }
 
   private getByPath(obj: any, path: string) {
