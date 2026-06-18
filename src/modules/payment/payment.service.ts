@@ -129,6 +129,7 @@ export class PaymentService {
             }
 
             const txData = (mpResponse as any).point_of_interaction?.transaction_data;
+            console.info(`[createPixPayment] point_of_interaction:`, JSON.stringify((mpResponse as any).point_of_interaction));
 
             const payment = await this.prisma.payment.create({
                 data: {

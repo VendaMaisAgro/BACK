@@ -1,5 +1,6 @@
 node_modules
 dist
+.claude
 
 # Environment variables
 .env
@@ -12,3 +13,4 @@ dist
 src/__mocks__/
 jest.config.js
 coverage/
+
