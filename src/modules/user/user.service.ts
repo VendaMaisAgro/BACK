@@ -114,7 +114,7 @@ export class UserService {
       where: { id },
     });
 
-    if (!user) throw new Error("Usuário não encontrado.");
+    if (!user) return null;
 
     const defaultAddress = await this.addressService.getDefaultAddress(id);
 

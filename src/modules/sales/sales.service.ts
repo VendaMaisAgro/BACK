@@ -145,6 +145,7 @@ export class SaleService {
           shippingAddress: true,
           paymentMethod: true,
           transportType: true,
+          Payment: true,
         },
         orderBy: { createdAt: "desc" },
       });
