@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import userRoutes from './modules/user/user.route';
 import addressRoutes from './modules/address/address.route';
@@ -46,5 +46,12 @@ app.use('/payment-methods', paymentMethodsRoutes);
 app.use('/payment', paymentRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/upload-s3', uploadS3Router);
+
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[Global Error Handler]', err);
+  res.status(err.status || 500).json({
+    error: err.message || 'Erro interno do servidor'
+  });
+});
 
 export default app;

@@ -226,6 +226,38 @@ export class PaymentController {
         }
     };
 
+    public createBoletoPayment: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const { saleId, paymentMethodId, amount, expirationDays } = req.body;
+
+            if (!saleId || !paymentMethodId || !amount) {
+                res.status(400).json({
+                    error: 'Dados obrigatórios não fornecidos.',
+                    required: ['saleId', 'paymentMethodId', 'amount']
+                });
+                return;
+            }
+
+            if (typeof amount !== 'number' || amount <= 0) {
+                res.status(400).json({ error: 'O valor do pagamento deve ser um número maior que zero.' });
+                return;
+            }
+
+            const result = await service.createBoletoPayment({ saleId, paymentMethodId, amount, expirationDays });
+
+            res.status(201).json(result);
+        } catch (error: any) {
+            console.error('Erro ao criar boleto:', error);
+            res.status(500).json({
+                error: 'Erro ao criar boleto.',
+                message: error.message,
+            });
+        }
+    };
+
     /**
      * Cancela um pagamento PIX pendente
      */

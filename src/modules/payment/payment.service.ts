@@ -110,48 +110,158 @@ export class PaymentService {
             console.info(`[createPixPayment] Criando pagamento PIX para venda ${params.saleId}`);
 
             const expirationMinutes = params.expirationMinutes || 30;
-            // Formato ISO 8601 para duração: PT30M = 30 minutos
-            const expirationTime = `PT${expirationMinutes}M`;
-
-            // Gera chave de idempotência única
+            const dateOfExpiration = new Date(Date.now() + expirationMinutes * 60 * 1000).toISOString();
             const idempotencyKey = randomUUID();
 
-            // Cria a order com pagamento PIX
+            const mpResponse = await mpPayment.create({
+                body: {
+                    transaction_amount: params.amount,
+                    payment_method_id: 'pix',
+                    payer: { email: params.email },
+                    external_reference: params.saleId,
+                    date_of_expiration: dateOfExpiration
+                },
+                requestOptions: { idempotencyKey }
+            });
+
+            if (!mpResponse.id) {
+                throw new Error('Resposta da API não contém ID do pagamento');
+            }
+
+            const txData = (mpResponse as any).point_of_interaction?.transaction_data;
+
+            const payment = await this.prisma.payment.create({
+                data: {
+                    saleId: params.saleId,
+                    paymentMethodId: params.paymentMethodId,
+                    amount: params.amount,
+                    status: 'pending',
+                    mp_payment_id: String(mpResponse.id),
+                }
+            });
+
+            console.info(`[createPixPayment] Pagamento PIX criado com sucesso - PaymentId: ${payment.id}, MP PaymentId: ${mpResponse.id}`);
+
+            return {
+                paymentId: payment.id,
+                mp_payment_id: mpResponse.id,
+                status: mpResponse.status,
+                status_detail: mpResponse.status_detail,
+                date_of_expiration: dateOfExpiration,
+                pix: {
+                    qr_code: txData?.qr_code,
+                    qr_code_base64: txData?.qr_code_base64,
+                    ticket_url: txData?.ticket_url
+                }
+            };
+        } catch (error: any) {
+            const message = error?.message || JSON.stringify(error);
+            console.error(`[createPixPayment] Erro ao criar pagamento PIX para venda ${params.saleId}:`, message);
+            throw new Error(message || 'Erro ao criar pagamento PIX');
+        }
+    }
+
+    async createBoletoPayment(params: {
+        saleId: string;
+        paymentMethodId: string;
+        amount: number;
+        expirationDays?: number;
+    }) {
+        try {
+            console.info(`[createBoletoPayment] Criando pagamento com boleto para venda ${params.saleId}`);
+
+            const sale = await this.prisma.saleData.findUnique({
+                where: { id: params.saleId },
+                include: {
+                    buyer: true,
+                    shippingAddress: true
+                }
+            });
+
+            if (!sale) throw new Error(`Venda não encontrada: ${params.saleId}`);
+            if (!sale.buyer) throw new Error('Dados do comprador não encontrados para esta venda');
+
+            let address = sale.shippingAddress;
+            if (!address) {
+                address = await this.prisma.address.findFirst({
+                    where: { userId: sale.buyerId, default: true }
+                });
+            }
+
+            if (!address) {
+                throw new Error('Endereço não encontrado. A venda precisa ter um endereço de entrega ou o comprador precisa ter um endereço padrão cadastrado.');
+            }
+
+            const nameParts = sale.buyer.name.trim().split(' ');
+            const firstName = nameParts[0];
+            const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : nameParts[0];
+
+            let identificationType: string;
+            let identificationNumber: string;
+
+            if (sale.buyer.cpf) {
+                identificationType = 'CPF';
+                identificationNumber = sale.buyer.cpf.replace(/[.\-]/g, '');
+            } else if (sale.buyer.cnpj) {
+                identificationType = 'CNPJ';
+                identificationNumber = sale.buyer.cnpj.replace(/[.\-/]/g, '');
+            } else {
+                throw new Error('Comprador não possui CPF ou CNPJ cadastrado');
+            }
+
+            const expirationDays = params.expirationDays || 3;
+            const expirationDate = new Date();
+            expirationDate.setDate(expirationDate.getDate() + expirationDays);
+            const expirationDateStr = expirationDate.toISOString().split('T')[0];
+
+            const idempotencyKey = randomUUID();
+
+            console.info(`[createBoletoPayment] Dados do pagador: ${firstName} ${lastName}, ${identificationType}: ${identificationNumber}`);
+
             const orderResponse = await orderClient.create({
                 body: {
                     type: 'online',
                     total_amount: params.amount.toFixed(2),
-                    external_reference: params.saleId,
+                    external_reference: String(sale.orderNumber),
                     processing_mode: 'automatic',
                     transactions: {
                         payments: [
                             {
                                 amount: params.amount.toFixed(2),
                                 payment_method: {
-                                    id: 'pix',
-                                    type: 'bank_transfer'
-                                },
-                                expiration_time: expirationTime
+                                    id: 'boleto',
+                                    type: 'ticket'
+                                }
                             }
                         ]
                     },
                     payer: {
-                        email: params.email
+                        email: sale.buyer.email,
+                        first_name: firstName,
+                        last_name: lastName,
+                        identification: {
+                            type: identificationType,
+                            number: identificationNumber
+                        },
+                        address: {
+                            zip_code: address.cep,
+                            street_name: address.street,
+                            street_number: address.number,
+                            neighborhood: address.alias || 'Centro',
+                            city: address.city,
+                            state: address.uf
+                        }
                     }
                 },
-                requestOptions: {
-                    idempotencyKey: idempotencyKey
-                }
-            });
+                requestOptions: { idempotencyKey }
+            } as any);
 
-            // Extrai dados do pagamento da resposta
             const paymentData = orderResponse.transactions?.payments?.[0];
 
             if (!paymentData) {
                 throw new Error('Resposta da API não contém dados de pagamento');
             }
 
-            // Salva o pagamento no banco de dados
             const payment = await this.prisma.payment.create({
                 data: {
                     saleId: params.saleId,
@@ -163,7 +273,7 @@ export class PaymentService {
                 }
             });
 
-            console.info(`[createPixPayment] Pagamento PIX criado com sucesso - PaymentId: ${payment.id}, OrderId: ${orderResponse.id}`);
+            console.info(`[createBoletoPayment] Boleto criado com sucesso - PaymentId: ${payment.id}, OrderId: ${orderResponse.id}`);
 
             return {
                 paymentId: payment.id,
@@ -173,14 +283,17 @@ export class PaymentService {
                     id: paymentData.id,
                     status: paymentData.status,
                     status_detail: paymentData.status_detail,
-                    qr_code: paymentData.payment_method?.qr_code,
-                    qr_code_base64: paymentData.payment_method?.qr_code_base64,
-                    ticket_url: paymentData.payment_method?.ticket_url
+                    ticket_url: paymentData.payment_method?.ticket_url,
+                    barcode_content: paymentData.payment_method?.barcode_content,
+                    digitable_line: paymentData.payment_method?.digitable_line,
+                    financial_institution: paymentData.payment_method?.financial_institution,
+                    expiration_date: expirationDateStr
                 }
             };
         } catch (error: any) {
-            console.error(`[createPixPayment] Erro ao criar pagamento PIX para venda ${params.saleId}:`, error.message);
-            throw new Error(error.message || 'Erro ao criar pagamento PIX');
+            console.error(`[createBoletoPayment] Erro ao criar boleto para venda ${params.saleId}:`, JSON.stringify(error, null, 2));
+            const message = error?.message || error?.cause?.message || JSON.stringify(error) || 'Erro ao criar pagamento com boleto';
+            throw new Error(message);
         }
     }
 
@@ -385,12 +498,16 @@ export class PaymentService {
                 return { error: 'Order sem external_reference' };
             }
 
-            // Busca o pagamento no banco pelo external_reference (saleId) ou mp_order_id
+            // Busca o pagamento no banco pelo external_reference (saleId ou orderNumber) ou mp_order_id
             let paymentRecord = await this.prisma.payment.findFirst({
                 where: {
                     OR: [
                         { saleId: externalReference },
-                        { mp_order_id: orderId }
+                        { mp_order_id: orderId },
+                        // external_reference pode ser orderNumber (número inteiro como string)
+                        ...(!isNaN(Number(externalReference)) ? [{
+                            sale: { orderNumber: parseInt(externalReference) }
+                        }] : [])
                     ]
                 },
                 orderBy: { createdAt: 'desc' }

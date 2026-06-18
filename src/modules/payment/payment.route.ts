@@ -538,6 +538,7 @@ router.get('/methods', controller.getPaymentMethods as RequestHandler);
  *         description: Erro ao criar pagamento PIX
  */
 router.post('/pix', controller.createPixPayment as RequestHandler);
+router.post('/boleto', controller.createBoletoPayment as RequestHandler);
 
 /**
  * @swagger
