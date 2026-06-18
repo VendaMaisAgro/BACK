@@ -110,26 +110,38 @@ export class PaymentService {
             console.info(`[createPixPayment] Criando pagamento PIX para venda ${params.saleId}`);
 
             const expirationMinutes = params.expirationMinutes || 30;
-            const dateOfExpiration = new Date(Date.now() + expirationMinutes * 60 * 1000).toISOString();
+            const expirationTime = `PT${expirationMinutes}M`;
             const idempotencyKey = randomUUID();
 
-            const mpResponse = await mpPayment.create({
+            const orderResponse = await orderClient.create({
                 body: {
-                    transaction_amount: params.amount,
-                    payment_method_id: 'pix',
-                    payer: { email: params.email },
+                    type: 'online',
+                    total_amount: params.amount.toFixed(2),
                     external_reference: params.saleId,
-                    date_of_expiration: dateOfExpiration
+                    processing_mode: 'automatic',
+                    transactions: {
+                        payments: [
+                            {
+                                amount: params.amount.toFixed(2),
+                                payment_method: {
+                                    id: 'pix',
+                                    type: 'bank_transfer'
+                                },
+                                expiration_time: expirationTime
+                            }
+                        ]
+                    },
+                    payer: {
+                        email: params.email
+                    }
                 },
                 requestOptions: { idempotencyKey }
             });
 
-            if (!mpResponse.id) {
-                throw new Error('Resposta da API não contém ID do pagamento');
+            const paymentData = orderResponse.transactions?.payments?.[0];
+            if (!paymentData) {
+                throw new Error('Resposta da API não contém dados de pagamento');
             }
-
-            const txData = (mpResponse as any).point_of_interaction?.transaction_data;
-            console.info(`[createPixPayment] point_of_interaction:`, JSON.stringify((mpResponse as any).point_of_interaction));
 
             const payment = await this.prisma.payment.create({
                 data: {
@@ -137,22 +149,24 @@ export class PaymentService {
                     paymentMethodId: params.paymentMethodId,
                     amount: params.amount,
                     status: 'pending',
-                    mp_payment_id: String(mpResponse.id),
+                    mp_order_id: orderResponse.id,
+                    mp_payment_id: paymentData.id,
                 }
             });
 
-            console.info(`[createPixPayment] Pagamento PIX criado com sucesso - PaymentId: ${payment.id}, MP PaymentId: ${mpResponse.id}`);
+            console.info(`[createPixPayment] Pagamento PIX criado com sucesso - PaymentId: ${payment.id}, OrderId: ${orderResponse.id}`);
 
             return {
                 paymentId: payment.id,
-                mp_payment_id: mpResponse.id,
-                status: mpResponse.status,
-                status_detail: mpResponse.status_detail,
-                date_of_expiration: dateOfExpiration,
-                pix: {
-                    qr_code: txData?.qr_code,
-                    qr_code_base64: txData?.qr_code_base64,
-                    ticket_url: txData?.ticket_url
+                orderId: orderResponse.id,
+                orderStatus: orderResponse.status,
+                payment: {
+                    id: paymentData.id,
+                    status: paymentData.status,
+                    status_detail: paymentData.status_detail,
+                    qr_code: (paymentData as any).payment_method?.qr_code,
+                    qr_code_base64: (paymentData as any).payment_method?.qr_code_base64,
+                    ticket_url: (paymentData as any).payment_method?.ticket_url
                 }
             };
         } catch (error: any) {
