@@ -1,19 +1,21 @@
 FROM node:23-alpine
 
-WORKDIR /home/node/app
+WORKDIR /app
 
 RUN apk update && apk upgrade && apk add --no-cache bash
 
-COPY ./package.json tsconfig.json .env ./
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev
 
+COPY tsconfig.json ./
 COPY prisma ./prisma/
-
 COPY src ./src/
 
-COPY entrypoint.sh ./entrypoint.sh
+RUN npx prisma generate
+RUN npm run build
 
-ENTRYPOINT [ "/home/node/app/entrypoint.sh" ]
+RUN npm prune --omit=dev
 
-RUN npm install --include=dev
+EXPOSE 3000
 
-RUN chmod +x ./entrypoint.sh
+CMD ["node", "dist/server.js"]

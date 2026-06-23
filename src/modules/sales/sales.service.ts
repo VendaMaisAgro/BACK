@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
-import { CreateSaleDataDto, UpdateSaleDataDto } from "./dto/create-sales.dto";
+import { CreateSaleDataDto, SellerDecisionDto, UpdateSaleDataDto } from "./dto/create-sales.dto";
+import { addBusinessDays, isWithinBusinessDays, lessThanHoursRemaining } from "../../lib/businessDays";
 
 export class SaleService {
   private readonly prisma: PrismaClient;
@@ -298,6 +299,66 @@ export class SaleService {
   }
 
   async update(id: string, data: UpdateSaleDataDto) {
+    const isReschedulingDates =
+      data.plannedHarvestDate !== undefined ||
+      data.plannedPickupDate !== undefined ||
+      data.plannedDeliveryDate !== undefined;
+
+    if (isReschedulingDates) {
+      const current = await this.prisma.saleData.findUnique({
+        where: { id },
+        select: {
+          plannedHarvestDate: true,
+          plannedPickupDate: true,
+          plannedDeliveryDate: true,
+          originalPlannedHarvestDate: true,
+          originalPlannedPickupDate: true,
+          originalPlannedDeliveryDate: true,
+        },
+      });
+      if (!current) throw new Error(`Venda (id=${id}) não encontrada`);
+
+      // Trava de 24h (Cláusulas 7 e 9): bloqueia se restar < 24h para a execução atual
+      const dateChecks: Array<{ current: Date | null; label: string }> = [
+        { current: current.plannedHarvestDate, label: "colheita/disponibilização" },
+        { current: current.plannedPickupDate, label: "retirada/embarque" },
+        { current: current.plannedDeliveryDate, label: "entrega no destino" },
+      ];
+      for (const { current: existingDate, label } of dateChecks) {
+        if (existingDate && lessThanHoursRemaining(existingDate, 24)) {
+          throw new Error(`RESCHEDULE_BLOCKED_24H:${label}`);
+        }
+      }
+
+      // Limite de 3 dias úteis da data original (Cláusula 9)
+      const rescheduleChecks: Array<{
+        newDate: Date | undefined;
+        original: Date | null;
+        label: string;
+      }> = [
+        {
+          newDate: data.plannedHarvestDate,
+          original: current.originalPlannedHarvestDate,
+          label: "colheita/disponibilização",
+        },
+        {
+          newDate: data.plannedPickupDate,
+          original: current.originalPlannedPickupDate,
+          label: "retirada/embarque",
+        },
+        {
+          newDate: data.plannedDeliveryDate,
+          original: current.originalPlannedDeliveryDate,
+          label: "entrega no destino",
+        },
+      ];
+      for (const { newDate, original, label } of rescheduleChecks) {
+        if (newDate && original && !isWithinBusinessDays(original, newDate, 3)) {
+          throw new Error(`RESCHEDULE_EXCEEDS_MAX_DAYS:${label}`);
+        }
+      }
+    }
+
     const updateData: any = {
       ...(data.transportTypeId !== undefined && { transportTypeId: data.transportTypeId }),
       ...(data.createdAt && { createdAt: data.createdAt }),
@@ -321,11 +382,12 @@ export class SaleService {
       ...(data.plannedHarvestDate !== undefined && { plannedHarvestDate: data.plannedHarvestDate }),
       ...(data.plannedPickupDate !== undefined && { plannedPickupDate: data.plannedPickupDate }),
       ...(data.plannedDeliveryDate !== undefined && { plannedDeliveryDate: data.plannedDeliveryDate }),
+      ...(data.actualDeliveryDate !== undefined && { actualDeliveryDate: data.actualDeliveryDate }),
       ...(data.technicalSpec !== undefined && { technicalSpec: data.technicalSpec }),
       ...(data.certifierRequired !== undefined && { certifierRequired: data.certifierRequired }),
     };
 
-    // opcional: sincronizar status quando sellerApproved vier no update
+    // Sincronizar status quando sellerApproved vier no update
     if (data.sellerApproved === true) updateData.status = "Aprovado pelo vendedor";
     if (data.sellerApproved === false) updateData.status = "Recusado pelo vendedor";
 
@@ -404,16 +466,147 @@ export class SaleService {
     return { saleDataId, baseFreight, distanceKm, pricePerKm, variableFreight, transportValue: finalFreight };
   }
 
-  async setSellerDecision(saleId: string, approved: boolean) {
+  async setSellerDecision(saleId: string, dto: SellerDecisionDto) {
     const sale = await this.prisma.saleData.findUnique({ where: { id: saleId } });
     if (!sale) throw new Error(`Venda (saleDataId=${saleId}) não encontrada`);
 
-    const newStatus = approved ? "Aprovado pelo vendedor" : "Recusado pelo vendedor";
+    const newStatus = dto.approved ? "Aprovado pelo vendedor" : "Recusado pelo vendedor";
+
+    const dateFields = dto.approved
+      ? {
+          ...(dto.plannedHarvestDate && { plannedHarvestDate: dto.plannedHarvestDate }),
+          ...(dto.plannedPickupDate && { plannedPickupDate: dto.plannedPickupDate }),
+          ...(dto.plannedDeliveryDate && { plannedDeliveryDate: dto.plannedDeliveryDate }),
+          // Cada original é gravado de forma independente, apenas na primeira vez que a data é fornecida
+          ...(!sale.originalPlannedHarvestDate && dto.plannedHarvestDate && {
+            originalPlannedHarvestDate: dto.plannedHarvestDate,
+          }),
+          ...(!sale.originalPlannedPickupDate && dto.plannedPickupDate && {
+            originalPlannedPickupDate: dto.plannedPickupDate,
+          }),
+          ...(!sale.originalPlannedDeliveryDate && dto.plannedDeliveryDate && {
+            originalPlannedDeliveryDate: dto.plannedDeliveryDate,
+          }),
+        }
+      : {};
 
     return this.prisma.saleData.update({
       where: { id: saleId },
-      data: { sellerApproved: approved, status: newStatus },
+      data: { sellerApproved: dto.approved, status: newStatus, ...dateFields },
       include: { boughtProducts: true },
     });
+  }
+
+  /**
+   * Registra um documento operacional (pesagem, NF, canhoto, etc.).
+   * Se docType === 'canhoto_nf', preenche actualDeliveryDate automaticamente (Cláusula 5).
+   * Documento e atualização da venda são atômicos (mesma transação).
+   */
+  async uploadOperationDocument(params: {
+    saleId: string;
+    uploadedById: string;
+    docType: string;
+    fileUrl: string;
+  }) {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: params.saleId },
+      select: { id: true, plannedDeliveryDate: true, actualDeliveryDate: true },
+    });
+    if (!sale) throw new Error(`Venda (id=${params.saleId}) não encontrada`);
+
+    return this.prisma.$transaction(async (tx) => {
+      const doc = await tx.operationDocument.create({
+        data: {
+          saleId: params.saleId,
+          uploadedById: params.uploadedById,
+          docType: params.docType,
+          fileUrl: params.fileUrl,
+        },
+      });
+
+      // Cláusula 5: canhoto confirma entrega se a venda ainda não tem actualDeliveryDate
+      // e o upload ocorre a partir da plannedDeliveryDate (não antes).
+      if (params.docType === 'canhoto_nf' && !sale.actualDeliveryDate) {
+        const now = new Date();
+        const afterDeliveryDate = !sale.plannedDeliveryDate || now >= sale.plannedDeliveryDate;
+
+        if (afterDeliveryDate) {
+          await tx.saleData.update({
+            where: { id: params.saleId },
+            data: { actualDeliveryDate: now, status: 'Entregue' },
+          });
+        }
+      }
+
+      return doc;
+    });
+  }
+
+  /**
+   * Verifica e aplica aceite tácito para uma venda (Cláusula 5):
+   * Se plannedDeliveryDate + 1 dia útil já passou e não há actualDeliveryDate,
+   * considera entrega realizada e atualiza o status para "Concluída".
+   */
+  async processTacitAcceptance(saleId: string) {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: saleId },
+      select: {
+        id: true,
+        status: true,
+        plannedDeliveryDate: true,
+        actualDeliveryDate: true,
+      },
+    });
+    if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+
+    if (sale.actualDeliveryDate) {
+      return { applied: false, reason: 'Entrega já registrada' };
+    }
+    if (!sale.plannedDeliveryDate) {
+      return { applied: false, reason: 'Sem data de entrega prevista' };
+    }
+
+    const tacitDeadline = addBusinessDays(sale.plannedDeliveryDate, 1);
+    if (new Date() < tacitDeadline) {
+      return { applied: false, reason: 'Prazo de aceite tácito ainda não venceu' };
+    }
+
+    await this.prisma.saleData.update({
+      where: { id: saleId },
+      data: {
+        actualDeliveryDate: tacitDeadline,
+        status: 'Concluída',
+      },
+    });
+
+    return { applied: true, actualDeliveryDate: tacitDeadline };
+  }
+
+  /**
+   * Processa aceite tácito para todas as vendas elegíveis (para uso em cron job).
+   */
+  async processBatchTacitAcceptances() {
+    const now = new Date();
+
+    // Vendas com data de entrega prevista no passado (+ 1 dia útil), sem entrega registrada
+    const candidates = await this.prisma.saleData.findMany({
+      where: {
+        actualDeliveryDate: null,
+        plannedDeliveryDate: { lt: now },
+        status: { notIn: ['Concluída', 'Recusado pelo vendedor', 'Cancelado'] },
+      },
+      select: { id: true, plannedDeliveryDate: true },
+    });
+
+    const results: Array<{ saleId: string; applied: boolean; reason?: string }> = [];
+    for (const sale of candidates) {
+      const tacitDeadline = addBusinessDays(sale.plannedDeliveryDate!, 1);
+      if (now >= tacitDeadline) {
+        const result = await this.processTacitAcceptance(sale.id);
+        results.push({ saleId: sale.id, ...result });
+      }
+    }
+
+    return { processed: results.length, results };
   }
 }
