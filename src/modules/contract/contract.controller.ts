@@ -52,15 +52,28 @@ export class ContractController {
   /**
    * POST /contract/accept
    * Salva o snapshot completo do contrato no momento do aceite pelo front-end.
+   * Apenas o comprador ou vendedor da venda pode salvar o snapshot.
    */
   async accept(req: Request, res: Response) {
     try {
+      const authUserId = req.user?.userId as string | undefined;
+      if (!authUserId) return res.status(401).json({ message: 'Token inválido ou ausente' });
+
       const { saleId, buyer, seller, items, conditions } = req.body ?? {};
 
       if (!saleId || !buyer || !seller || !items || !conditions) {
         return res.status(400).json({
           message: 'saleId, buyer, seller, items e conditions são obrigatórios',
         });
+      }
+
+      const buyerId = await service.getBuyerIdForSale(saleId);
+      if (!buyerId) return res.status(404).json({ message: 'Venda não encontrada' });
+
+      const sellers = await service.getSellersForSale(saleId);
+      const isOwner = authUserId === buyerId || sellers.includes(authUserId);
+      if (!isOwner) {
+        return res.status(403).json({ message: 'Usuário não pertence a esta venda' });
       }
 
       const snapshot = await service.saveSnapshot(saleId, { buyer, seller, items, conditions });

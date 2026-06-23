@@ -251,18 +251,18 @@ router.get("/buyer/:userId", controller.getPurchasesForBuyer);
  *               plannedHarvestDate:
  *                 type: string
  *                 format: date-time
- *                 description: Obrigatório quando approved=true
+ *                 description: Opcional — pode ser preenchido via PATCH /sales/:id posteriormente
  *               plannedPickupDate:
  *                 type: string
  *                 format: date-time
- *                 description: Obrigatório quando approved=true
+ *                 description: Opcional — pode ser preenchido via PATCH /sales/:id posteriormente
  *               plannedDeliveryDate:
  *                 type: string
  *                 format: date-time
- *                 description: Obrigatório quando o transporte não for retirada no local
+ *                 description: Opcional — pode ser preenchido via PATCH /sales/:id posteriormente
  *     responses:
  *       200: { description: Decisão registrada }
- *       400: { description: Payload inválido ou datas obrigatórias ausentes }
+ *       400: { description: Payload inválido }
  *       404: { description: Venda não encontrada }
  */
 router.patch("/:id/seller-decision", controller.setSellerDecision as RequestHandler);

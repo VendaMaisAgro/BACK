@@ -477,11 +477,15 @@ export class SaleService {
           ...(dto.plannedHarvestDate && { plannedHarvestDate: dto.plannedHarvestDate }),
           ...(dto.plannedPickupDate && { plannedPickupDate: dto.plannedPickupDate }),
           ...(dto.plannedDeliveryDate && { plannedDeliveryDate: dto.plannedDeliveryDate }),
-          // Grava as datas originais apenas na primeira aprovação e quando fornecidas
+          // Cada original é gravado de forma independente, apenas na primeira vez que a data é fornecida
           ...(!sale.originalPlannedHarvestDate && dto.plannedHarvestDate && {
             originalPlannedHarvestDate: dto.plannedHarvestDate,
-            ...(dto.plannedPickupDate && { originalPlannedPickupDate: dto.plannedPickupDate }),
-            ...(dto.plannedDeliveryDate && { originalPlannedDeliveryDate: dto.plannedDeliveryDate }),
+          }),
+          ...(!sale.originalPlannedPickupDate && dto.plannedPickupDate && {
+            originalPlannedPickupDate: dto.plannedPickupDate,
+          }),
+          ...(!sale.originalPlannedDeliveryDate && dto.plannedDeliveryDate && {
+            originalPlannedDeliveryDate: dto.plannedDeliveryDate,
           }),
         }
       : {};
@@ -495,8 +499,8 @@ export class SaleService {
 
   /**
    * Registra um documento operacional (pesagem, NF, canhoto, etc.).
-   * Se docType === 'canhoto_nf', preenche actualDeliveryDate automaticamente
-   * (Cláusula 5 – janela de 6h após chegada).
+   * Se docType === 'canhoto_nf', preenche actualDeliveryDate automaticamente (Cláusula 5).
+   * Documento e atualização da venda são atômicos (mesma transação).
    */
   async uploadOperationDocument(params: {
     saleId: string;
@@ -510,43 +514,38 @@ export class SaleService {
     });
     if (!sale) throw new Error(`Venda (id=${params.saleId}) não encontrada`);
 
-    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const doc = await tx.operationDocument.create({
+        data: {
+          saleId: params.saleId,
+          uploadedById: params.uploadedById,
+          docType: params.docType,
+          fileUrl: params.fileUrl,
+        },
+      });
 
-    const doc = await this.prisma.operationDocument.create({
-      data: {
-        saleId: params.saleId,
-        uploadedById: params.uploadedById,
-        docType: params.docType,
-        fileUrl: params.fileUrl,
-      },
-    });
+      // Cláusula 5: canhoto confirma entrega se a venda ainda não tem actualDeliveryDate
+      // e o upload ocorre a partir da plannedDeliveryDate (não antes).
+      if (params.docType === 'canhoto_nf' && !sale.actualDeliveryDate) {
+        const now = new Date();
+        const afterDeliveryDate = !sale.plannedDeliveryDate || now >= sale.plannedDeliveryDate;
 
-    // Cláusula 5: upload do canhoto dentro da janela de 6h → registra entrega efetiva
-    if (params.docType === 'canhoto_nf' && !sale.actualDeliveryDate) {
-      const expectedArrivalBase = sale.plannedDeliveryDate
-        ? addBusinessDays(sale.plannedDeliveryDate, 1)
-        : null;
-
-      const withinWindow =
-        !expectedArrivalBase ||
-        (now >= sale.plannedDeliveryDate! &&
-          now.getTime() - expectedArrivalBase.getTime() <= 6 * 60 * 60 * 1000);
-
-      if (withinWindow) {
-        await this.prisma.saleData.update({
-          where: { id: params.saleId },
-          data: { actualDeliveryDate: now, status: 'Entregue' },
-        });
+        if (afterDeliveryDate) {
+          await tx.saleData.update({
+            where: { id: params.saleId },
+            data: { actualDeliveryDate: now, status: 'Entregue' },
+          });
+        }
       }
-    }
 
-    return doc;
+      return doc;
+    });
   }
 
   /**
    * Verifica e aplica aceite tácito para uma venda (Cláusula 5):
-   * Se plannedDeliveryDate + 1 dia útil já passou e não há actualDeliveryDate nem
-   * contestação, considera entrega realizada, atualiza status e liquida o saldo.
+   * Se plannedDeliveryDate + 1 dia útil já passou e não há actualDeliveryDate,
+   * considera entrega realizada e atualiza o status para "Concluída".
    */
   async processTacitAcceptance(saleId: string) {
     const sale = await this.prisma.saleData.findUnique({

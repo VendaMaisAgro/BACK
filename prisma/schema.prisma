@@ -310,7 +310,7 @@ model SaleContract {
   items      Json
   conditions Json
 
-  sale SaleData @relation(fields: [saleId], references: [id])
+  sale SaleData @relation(fields: [saleId], references: [id], onDelete: Cascade)
 }
 
 model ConformityCertifier {

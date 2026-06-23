@@ -342,8 +342,9 @@ export class ContractService {
   }
 
   /**
-   * Salva (ou substitui) o snapshot do contrato de uma venda.
-   * Chamado pelo front em POST /contract/accept após o usuário aceitar.
+   * Salva o snapshot do contrato de uma venda — imutável após o primeiro aceite.
+   * Retorna o existente sem erro se já houver snapshot (idempotente).
+   * userId deve ser o comprador ou vendedor da venda (ownership verificado no controller).
    */
   async saveSnapshot(saleId: string, payload: {
     buyer: Record<string, any>;
@@ -351,19 +352,15 @@ export class ContractService {
     items: Record<string, any>[];
     conditions: Record<string, any>;
   }) {
-    const sale = await prisma.saleData.findUnique({ where: { id: saleId }, select: { id: true } });
+    const sale = await prisma.saleData.findUnique({ where: { id: saleId }, select: { id: true, saleContract: true } });
     if (!sale) throw new Error('SALE_NOT_FOUND');
 
-    return prisma.saleContract.upsert({
-      where: { saleId },
-      update: {
-        buyer: payload.buyer,
-        seller: payload.seller,
-        items: payload.items,
-        conditions: payload.conditions,
-        acceptedAt: new Date(),
-      },
-      create: {
+    if (sale.saleContract) {
+      return sale.saleContract;
+    }
+
+    return prisma.saleContract.create({
+      data: {
         saleId,
         buyer: payload.buyer,
         seller: payload.seller,
