@@ -1,6 +1,4 @@
 #!/bin/sh
+set -e
 
-npm install
-npx prisma generate
-npx prisma migrate dev --name init
-npm run dev
+exec node dist/server.js
