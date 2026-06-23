@@ -195,12 +195,27 @@ export class SaleController {
 
   /** POST /sales/:id/documents — upload de documento operacional */
   public uploadDocument: RequestHandler = async (req, res) => {
+    const VALID_DOC_TYPES = ['pesagem_tara', 'pesagem_bruto', 'nota_fiscal', 'canhoto_nf'] as const;
+
     try {
       const saleId = req.params.id;
-      const { uploadedById, docType, fileUrl } = req.body;
+      const uploadedById = req.user?.userId as string | undefined;
+      if (!uploadedById) {
+        res.status(401).json({ error: "Token inválido ou ausente." });
+        return;
+      }
 
-      if (!uploadedById || !docType || !fileUrl) {
-        res.status(400).json({ error: "uploadedById, docType e fileUrl são obrigatórios." });
+      const { docType, fileUrl } = req.body;
+
+      if (!docType || !fileUrl) {
+        res.status(400).json({ error: "docType e fileUrl são obrigatórios." });
+        return;
+      }
+
+      if (!VALID_DOC_TYPES.includes(docType)) {
+        res.status(400).json({
+          error: `docType inválido. Valores aceitos: ${VALID_DOC_TYPES.join(', ')}.`,
+        });
         return;
       }
 
