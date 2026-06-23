@@ -49,71 +49,28 @@ export class ContractController {
     res.status(201).json(created);
   }
 
+  /**
+   * POST /contract/accept
+   * Salva o snapshot completo do contrato no momento do aceite pelo front-end.
+   */
   async accept(req: Request, res: Response) {
     try {
-      const authUserId = req.user?.userId as string | undefined;
-      if (!authUserId) return res.status(401).json({ message: 'Token inválido ou ausente' });
+      const { saleId, buyer, seller, items, conditions } = req.body ?? {};
 
-      const contractId = req.body.contractId;
-      const accepted = req.body.accepted;
-      const saleId = req.body.saleId ? String(req.body.saleId) : undefined;
-
-      const roleStr = String(req.body.role || '').toUpperCase();
-      if (!['BUYER', 'SELLER'].includes(roleStr)) {
-        return res.status(400).json({ message: 'role deve ser BUYER ou SELLER' });
-      }
-      const role = roleStr === 'SELLER' ? AcceptanceRole.SELLER : AcceptanceRole.BUYER;
-
-      if (!Number.isFinite(contractId) || contractId <= 0 || typeof accepted !== 'boolean') {
-        return res.status(400).json({ message: 'Parâmetros inválidos' });
+      if (!saleId || !buyer || !seller || !items || !conditions) {
+        return res.status(400).json({
+          message: 'saleId, buyer, seller, items e conditions são obrigatórios',
+        });
       }
 
-      if (saleId) {
-        if (role === AcceptanceRole.BUYER) {
-          const buyerId = await service.getBuyerIdForSale(saleId);
-          if (!buyerId) return res.status(404).json({ message: 'Venda não encontrada' });
-          if (buyerId !== authUserId) {
-            return res.status(403).json({ message: 'Usuário não é o comprador desta venda' });
-          }
-        } else if (role === AcceptanceRole.SELLER) {
-          const sellers = await service.getSellersForSale(saleId);
-          if (!sellers.includes(authUserId)) {
-            return res.status(403).json({ message: 'Usuário não é vendedor desta venda' });
-          }
-        }
-      }
-
-      const clientIp =
-        (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-        req.socket.remoteAddress ??
-        '';
-      const userAgent = req.get('user-agent') ?? '';
-
-      const created = await service.acceptContract({
-        userId: authUserId,
-        contractId,
-        accepted,
-        clientIp,
-        userAgent,
-        saleId,
-        role,
-      });
-
-      return res.status(201).json({ message: 'Aceite registrado', id: created.id });
+      const snapshot = await service.saveSnapshot(saleId, { buyer, seller, items, conditions });
+      return res.status(201).json({ message: 'Contrato salvo', id: snapshot.id });
     } catch (err: any) {
-      if (err?.code === 'P2002') {
-        return res
-          .status(409)
-          .json({ message: 'Já existe um aceite para este usuário/contrato/venda/papel' });
-      }
-      if (err?.code === 'P2003') {
-        return res.status(400).json({ message: 'IDs inválidos (chave estrangeira)' });
-      }
-      if (err?.message === 'CONTRACT_NOT_FOUND') {
-        return res.status(404).json({ message: 'Contrato inexistente' });
+      if (err?.message === 'SALE_NOT_FOUND') {
+        return res.status(404).json({ message: 'Venda não encontrada' });
       }
       console.error(err);
-      return res.status(500).json({ message: 'Erro ao registrar aceite' });
+      return res.status(500).json({ message: 'Erro ao salvar contrato' });
     }
   }
 
@@ -282,13 +239,18 @@ export class ContractController {
     }
   }
 
+  /**
+   * GET /contract/sale/:saleId/context
+   * Retorna o snapshot salvo (se existir) ou deriva dos dados ao vivo da venda.
+   * Formato consumido pelo ContractTemplate do front-end.
+   */
   async saleContext(req: Request, res: Response) {
     try {
       const saleId = String(req.params.saleId);
       if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
 
       const sellerId = req.query.sellerId ? String(req.query.sellerId) : undefined;
-      const ctx = await service.getSaleRawContext(saleId, sellerId);
+      const ctx = await service.getSaleContractContext(saleId, sellerId);
       return res.json(ctx);
     } catch (err: any) {
       if (err?.message === 'SALE_NOT_FOUND') {

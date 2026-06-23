@@ -186,14 +186,19 @@ model SaleData {
   paymentType         String?   @map("payment_type")
   paymentTermDays     Int?      @map("payment_term_days")
   downPaymentPercent  Int?      @map("down_payment_percent")
-  plannedHarvestDate  DateTime? @map("planned_harvest_date")
-  plannedPickupDate   DateTime? @map("planned_pickup_date")
-  plannedDeliveryDate DateTime? @map("planned_delivery_date")
+  plannedHarvestDate         DateTime? @map("planned_harvest_date")
+  plannedPickupDate          DateTime? @map("planned_pickup_date")
+  plannedDeliveryDate        DateTime? @map("planned_delivery_date")
+  originalPlannedHarvestDate DateTime? @map("original_planned_harvest_date")
+  originalPlannedPickupDate  DateTime? @map("original_planned_pickup_date")
+  originalPlannedDeliveryDate DateTime? @map("original_planned_delivery_date")
+  actualDeliveryDate         DateTime? @map("actual_delivery_date")
   technicalSpec       String?   @map("technical_spec")
   certifierRequired   Boolean?  @map("certifier_required")
 
   conformityCertifier ConformityCertifier?
   operationDocuments  OperationDocument[]
+  saleContract        SaleContract?
 }
 
 model BoughtProduct {
@@ -293,6 +298,19 @@ model Contract {
 
   @@unique([kind, version])
   @@index([kind, createdAt])
+}
+
+model SaleContract {
+  id         String   @id @default(uuid())
+  saleId     String   @unique @map("sale_id")
+  acceptedAt DateTime @default(now()) @map("accepted_at")
+
+  buyer      Json
+  seller     Json
+  items      Json
+  conditions Json
+
+  sale SaleData @relation(fields: [saleId], references: [id])
 }
 
 model ConformityCertifier {

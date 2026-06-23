@@ -201,6 +201,11 @@ export class ContractService {
     return [...ids];
   }
 
+  private formatDate(date: Date | null | undefined): string {
+    if (!date) return '';
+    return new Date(date).toLocaleDateString('pt-BR', { timeZone: 'America/Bahia' });
+  }
+
   private async getSaleContext(saleId: string, preferSellerId?: string) {
     const sale = await prisma.saleData.findUnique({
       where: { id: saleId },
@@ -233,9 +238,10 @@ export class ContractService {
     const items = itemsFiltered.map(bp => {
       const unitTitle = bp.sellingUnitProduct?.unit?.title ?? '';
       const unit = bp.sellingUnitProduct?.unit?.unit ?? '';
-      const unitPrice = bp.value;
+      // bp.value é o total (minPrice * amount) armazenado pelo sales.service
+      const total = Number(bp.value);
       const amount = bp.amount;
-      const total = unitPrice * amount;
+      const unitPrice = amount > 0 ? total / amount : 0;
       return {
         productName: bp.product?.name ?? '',
         variety: bp.product?.variety ?? '',
@@ -271,19 +277,21 @@ export class ContractService {
     return {
       sale: {
         id: sale.id,
-        createdAt: sale.createdAt,
+        orderNumber: sale.orderNumber,
+        createdAt: this.formatDate(sale.createdAt),
         status: sale.status,
         sellerProfile: saleExtra.sellerProfile ?? '',
         packagingType: saleExtra.packagingType ?? '',
         paymentType: saleExtra.paymentType ?? '',
-        paymentTermDays: saleExtra.paymentTermDays ?? null,
-        downPaymentPercent: saleExtra.downPaymentPercent ?? null,
-        plannedHarvestDate: saleExtra.plannedHarvestDate ?? null,
-        plannedPickupDate: saleExtra.plannedPickupDate ?? null,
-        plannedDeliveryDate: saleExtra.plannedDeliveryDate ?? null,
+        paymentTermDays: saleExtra.paymentTermDays ?? '',
+        downPaymentPercent: saleExtra.downPaymentPercent ?? '',
+        plannedHarvestDate: this.formatDate(saleExtra.plannedHarvestDate),
+        plannedPickupDate: this.formatDate(saleExtra.plannedPickupDate),
+        plannedDeliveryDate: this.formatDate(saleExtra.plannedDeliveryDate),
+        actualDeliveryDate: this.formatDate(saleExtra.actualDeliveryDate),
         technicalSpec: saleExtra.technicalSpec ?? '',
-        certifierRequired: saleExtra.certifierRequired ?? null,
-        cargoWeightKg: saleExtra.cargoWeightKg ?? null,
+        certifierRequired: saleExtra.certifierRequired != null ? (saleExtra.certifierRequired ? 'SIM' : 'NÃO') : '',
+        cargoWeightKg: saleExtra.cargoWeightKg != null ? String(saleExtra.cargoWeightKg) : '',
       },
       buyer: {
         id: sale.buyerId,
@@ -316,11 +324,125 @@ export class ContractService {
           }
         : null,
       items,
-      totals: { ...totals, grand },
+      totals: {
+        items: totals.items,
+        itemsFormatted: `R$ ${totals.items.toFixed(2)}`,
+        freight: totals.freight,
+        freightFormatted: `R$ ${totals.freight.toFixed(2)}`,
+        grand,
+        grandFormatted: `R$ ${grand.toFixed(2)}`,
+      },
       'items.list': items
-        .map(it => `- ${it.productName} (${it.variety}) x ${it.amount} ${it.unitTitle || it.unit || ''} = R$ ${it.total.toFixed(2)}`)
+        .map(it =>
+          `- ${it.productName}${it.variety ? ` (${it.variety})` : ''} x ${it.amount} ${it.unitTitle || it.unit || ''} — R$ ${it.unitPrice.toFixed(2)}/${it.unitTitle || it.unit || 'un'} = R$ ${it.total.toFixed(2)}`
+        )
         .join('\n'),
       meta: { sellers },
+    };
+  }
+
+  /**
+   * Salva (ou substitui) o snapshot do contrato de uma venda.
+   * Chamado pelo front em POST /contract/accept após o usuário aceitar.
+   */
+  async saveSnapshot(saleId: string, payload: {
+    buyer: Record<string, any>;
+    seller: Record<string, any>;
+    items: Record<string, any>[];
+    conditions: Record<string, any>;
+  }) {
+    const sale = await prisma.saleData.findUnique({ where: { id: saleId }, select: { id: true } });
+    if (!sale) throw new Error('SALE_NOT_FOUND');
+
+    return prisma.saleContract.upsert({
+      where: { saleId },
+      update: {
+        buyer: payload.buyer,
+        seller: payload.seller,
+        items: payload.items,
+        conditions: payload.conditions,
+        acceptedAt: new Date(),
+      },
+      create: {
+        saleId,
+        buyer: payload.buyer,
+        seller: payload.seller,
+        items: payload.items,
+        conditions: payload.conditions,
+      },
+    });
+  }
+
+  /**
+   * Retorna o contexto do contrato no formato que o front-end espera.
+   * Prioriza o snapshot salvo; se não existir, deriva dos dados ao vivo da venda.
+   */
+  async getSaleContractContext(saleId: string, sellerId?: string) {
+    const sale = await prisma.saleData.findUnique({
+      where: { id: saleId },
+      include: { saleContract: true },
+    });
+    if (!sale) throw new Error('SALE_NOT_FOUND');
+
+    const saleAny = sale as any;
+
+    if (sale.saleContract) {
+      const snap = sale.saleContract;
+      const conditions = snap.conditions as Record<string, any>;
+      return {
+        contractNumber: sale.orderNumber,
+        emissionDate: snap.acceptedAt,
+        buyer: snap.buyer,
+        seller: snap.seller,
+        items: snap.items,
+        conditions: {
+          ...conditions,
+          actualDeliveryDate: saleAny.actualDeliveryDate ?? null,
+        },
+      };
+    }
+
+    // Sem snapshot — deriva dos dados ao vivo
+    const ctx = await this.getSaleContext(saleId, sellerId);
+    if (!ctx) throw new Error('SALE_NOT_FOUND');
+
+    return {
+      contractNumber: sale.orderNumber,
+      emissionDate: sale.createdAt,
+      buyer: {
+        name: ctx.buyer.name,
+        cpf: ctx.buyer.cpf || null,
+        cnpj: ctx.buyer.cnpj || null,
+        address: ctx.buyer.address,
+        role: 'buyer',
+      },
+      seller: ctx.seller
+        ? {
+            name: ctx.seller.name,
+            cpf: ctx.seller.cpf || null,
+            cnpj: ctx.seller.cnpj || null,
+            address: ctx.seller.address,
+            role: saleAny.sellerProfile ?? 'farmer',
+          }
+        : null,
+      items: ctx.items.map(it => ({
+        name: it.productName,
+        variety: it.variety,
+        harvestAt: saleAny.plannedHarvestDate ?? null,
+        amount: it.amount,
+        unit: it.unitTitle || it.unit,
+        unitPrice: it.unitPrice,
+        total: it.total,
+      })),
+      conditions: {
+        paymentMethod: saleAny.paymentType ?? '',
+        total: ctx.totals.grand,
+        plannedHarvestDate: saleAny.plannedHarvestDate ?? null,
+        plannedPickupDate: saleAny.plannedPickupDate ?? null,
+        plannedDeliveryDate: saleAny.plannedDeliveryDate ?? null,
+        actualDeliveryDate: saleAny.actualDeliveryDate ?? null,
+        packagingType: saleAny.packagingType ?? '',
+      },
     };
   }
 

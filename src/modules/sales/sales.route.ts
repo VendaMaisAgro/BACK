@@ -231,14 +231,13 @@ router.get("/buyer/:userId", controller.getPurchasesForBuyer);
  * @swagger
  * /sales/{id}/seller-decision:
  *   patch:
- *     summary: Marca a decisão do vendedor (aceitar ou recusar o pedido)
+ *     summary: Decisão do vendedor (aceitar ou recusar o pedido). Ao aceitar, preenche as datas do contrato.
  *     tags: [Sales]
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema: { type: string, format: uuid }
- *         description: ID da venda (saleDataId)
  *     requestBody:
  *       required: true
  *       content:
@@ -249,15 +248,86 @@ router.get("/buyer/:userId", controller.getPurchasesForBuyer);
  *             properties:
  *               approved:
  *                 type: boolean
- *                 description: true=aceitar, false=recusar
- *           examples:
- *             aceitar: { value: { approved: true } }
- *             recusar: { value: { approved: false } }
+ *               plannedHarvestDate:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Obrigatório quando approved=true
+ *               plannedPickupDate:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Obrigatório quando approved=true
+ *               plannedDeliveryDate:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Obrigatório quando o transporte não for retirada no local
  *     responses:
  *       200: { description: Decisão registrada }
- *       400: { description: Payload inválido }
+ *       400: { description: Payload inválido ou datas obrigatórias ausentes }
  *       404: { description: Venda não encontrada }
  */
 router.patch("/:id/seller-decision", controller.setSellerDecision as RequestHandler);
+
+/**
+ * @swagger
+ * /sales/{id}/documents:
+ *   post:
+ *     summary: Registra documento operacional (pesagem, NF, canhoto). Upload de canhoto_nf registra entrega efetiva.
+ *     tags: [Sales]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [uploadedById, docType, fileUrl]
+ *             properties:
+ *               uploadedById:
+ *                 type: string
+ *                 format: uuid
+ *               docType:
+ *                 type: string
+ *                 enum: [pesagem_tara, pesagem_bruto, nota_fiscal, canhoto_nf]
+ *                 description: canhoto_nf preenche automaticamente a data de entrega efetiva (Cláusula 5)
+ *               fileUrl:
+ *                 type: string
+ *     responses:
+ *       201: { description: Documento registrado }
+ *       400: { description: Parâmetros inválidos }
+ *       404: { description: Venda não encontrada }
+ */
+router.post("/:id/documents", controller.uploadDocument as RequestHandler);
+
+/**
+ * @swagger
+ * /sales/{id}/tacit-acceptance:
+ *   post:
+ *     summary: Aplica aceite tácito para a venda (Cláusula 5 – plannedDeliveryDate + 1 dia útil vencido)
+ *     tags: [Sales]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: Resultado do processamento }
+ *       404: { description: Venda não encontrada }
+ */
+router.post("/:id/tacit-acceptance", controller.tacitAcceptance as RequestHandler);
+
+/**
+ * @swagger
+ * /sales/batch-tacit-acceptance:
+ *   post:
+ *     summary: Processa aceites tácitos em lote para todas as vendas elegíveis (uso por cron job)
+ *     tags: [Sales]
+ *     responses:
+ *       200: { description: Resultado do processamento em lote }
+ */
+router.post("/batch-tacit-acceptance", controller.batchTacitAcceptance as RequestHandler);
 
 export default router;

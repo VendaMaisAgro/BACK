@@ -1,6 +1,6 @@
 import { Request, Response, RequestHandler } from "express";
 import { SaleService } from "./sales.service";
-import { CreateSaleDataDto, UpdateSaleDataDto } from "./dto/create-sales.dto";
+import { CreateSaleDataDto, SellerDecisionDto, UpdateSaleDataDto } from "./dto/create-sales.dto";
 
 const service = new SaleService();
 
@@ -111,6 +111,22 @@ export class SaleController {
       res.json(result);
     } catch (error: any) {
       console.error(error);
+      if (error.message?.startsWith("RESCHEDULE_BLOCKED_24H:")) {
+        const field = error.message.split(":")[1];
+        res.status(409).json({
+          error: `Faltam menos de 24h para a operação de ${field}. Para reagendar, entre em contato com o suporte. Sujeito à multa de 10% conforme Cláusula 7.`,
+          code: "RESCHEDULE_BLOCKED_24H",
+        });
+        return;
+      }
+      if (error.message?.startsWith("RESCHEDULE_EXCEEDS_MAX_DAYS:")) {
+        const field = error.message.split(":")[1];
+        res.status(409).json({
+          error: `A nova data de ${field} excede o limite de 3 dias úteis da data original contratada (Cláusula 9).`,
+          code: "RESCHEDULE_EXCEEDS_MAX_DAYS",
+        });
+        return;
+      }
       res.status(500).json({ error: "Failed to update sale" });
     }
   };
@@ -147,18 +163,83 @@ export class SaleController {
   public setSellerDecision: RequestHandler = async (req, res) => {
     try {
       const id = req.params.id;
-      const { approved } = req.body;
+      const { approved, plannedHarvestDate, plannedPickupDate, plannedDeliveryDate } = req.body;
 
       if (typeof approved !== "boolean") {
         res.status(400).json({ error: "Campo 'approved' deve ser boolean." });
         return;
       }
 
-      const result = await service.setSellerDecision(id, approved);
+      const dto: SellerDecisionDto = {
+        approved,
+        plannedHarvestDate: plannedHarvestDate ? new Date(plannedHarvestDate) : undefined,
+        plannedPickupDate: plannedPickupDate ? new Date(plannedPickupDate) : undefined,
+        plannedDeliveryDate: plannedDeliveryDate ? new Date(plannedDeliveryDate) : undefined,
+      };
+
+      const result = await service.setSellerDecision(id, dto);
       res.status(200).json(result);
     } catch (error: any) {
       console.error(error);
+      if (error.message === "PLANNED_HARVEST_DATE_REQUIRED") {
+        res.status(400).json({ error: "plannedHarvestDate é obrigatório ao aprovar o pedido." });
+        return;
+      }
+      if (error.message === "PLANNED_PICKUP_DATE_REQUIRED") {
+        res.status(400).json({ error: "plannedPickupDate é obrigatório ao aprovar o pedido." });
+        return;
+      }
       res.status(500).json({ error: error.message || "Failed to set seller decision" });
+    }
+  };
+
+  /** POST /sales/:id/documents — upload de documento operacional */
+  public uploadDocument: RequestHandler = async (req, res) => {
+    try {
+      const saleId = req.params.id;
+      const { uploadedById, docType, fileUrl } = req.body;
+
+      if (!uploadedById || !docType || !fileUrl) {
+        res.status(400).json({ error: "uploadedById, docType e fileUrl são obrigatórios." });
+        return;
+      }
+
+      const doc = await service.uploadOperationDocument({ saleId, uploadedById, docType, fileUrl });
+      res.status(201).json(doc);
+    } catch (error: any) {
+      console.error(error);
+      if (error.message?.includes("não encontrada")) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      res.status(500).json({ error: "Erro ao registrar documento." });
+    }
+  };
+
+  /** POST /sales/:id/tacit-acceptance — aplica aceite tácito manualmente */
+  public tacitAcceptance: RequestHandler = async (req, res) => {
+    try {
+      const saleId = req.params.id;
+      const result = await service.processTacitAcceptance(saleId);
+      res.json(result);
+    } catch (error: any) {
+      console.error(error);
+      if (error.message?.includes("não encontrada")) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      res.status(500).json({ error: "Erro ao processar aceite tácito." });
+    }
+  };
+
+  /** POST /sales/batch-tacit-acceptance — processa aceites tácitos em lote (cron) */
+  public batchTacitAcceptance: RequestHandler = async (_req, res) => {
+    try {
+      const result = await service.processBatchTacitAcceptances();
+      res.json(result);
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: "Erro ao processar aceites tácitos em lote." });
     }
   };
 }
