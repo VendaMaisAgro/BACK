@@ -384,9 +384,17 @@ export class ContractService {
   async getSaleContractContext(saleId: string, sellerId?: string) {
     const sale = await prisma.saleData.findUnique({
       where: { id: saleId },
-      include: { saleContract: true },
+      include: {
+        saleContract: true,
+        Payment: { orderBy: { updatedAt: 'desc' } },
+      },
     });
     if (!sale) throw new Error('SALE_NOT_FOUND');
+
+    // Momento da confirmação do pagamento: updatedAt do Payment mais recente quando paymentCompleted = true
+    const paymentConfirmedAt = sale.paymentCompleted
+      ? (sale.Payment?.[0]?.updatedAt ?? null)
+      : null;
 
     const saleAny = sale as any;
 
@@ -407,6 +415,7 @@ export class ContractService {
           plannedPickupDate: saleAny.plannedPickupDate ?? conditions.plannedPickupDate ?? null,
           plannedDeliveryDate: saleAny.plannedDeliveryDate ?? conditions.plannedDeliveryDate ?? null,
           actualDeliveryDate: saleAny.actualDeliveryDate ?? null,
+          paymentConfirmedAt: paymentConfirmedAt ?? null,
         },
       };
     }
@@ -451,6 +460,7 @@ export class ContractService {
         plannedDeliveryDate: saleAny.plannedDeliveryDate ?? null,
         actualDeliveryDate: saleAny.actualDeliveryDate ?? null,
         packagingType: saleAny.packagingType ?? '',
+        paymentConfirmedAt: paymentConfirmedAt ?? null,
       },
     };
   }
