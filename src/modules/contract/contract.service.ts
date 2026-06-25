@@ -342,9 +342,10 @@ export class ContractService {
   }
 
   /**
-   * Salva o snapshot do contrato de uma venda — imutável após o primeiro aceite.
-   * Retorna o existente sem erro se já houver snapshot (idempotente).
-   * userId deve ser o comprador ou vendedor da venda (ownership verificado no controller).
+   * Salva ou atualiza o snapshot do contrato de uma venda.
+   * A chamada do vendedor (após PATCH /seller-decision) sobrescreve a do comprador,
+   * tornando-se a versão final e autoritativa do contrato.
+   * Ownership verificado no controller antes de chamar este método.
    */
   async saveSnapshot(saleId: string, payload: {
     buyer: Record<string, any>;
@@ -352,15 +353,19 @@ export class ContractService {
     items: Record<string, any>[];
     conditions: Record<string, any>;
   }) {
-    const sale = await prisma.saleData.findUnique({ where: { id: saleId }, select: { id: true, saleContract: true } });
+    const sale = await prisma.saleData.findUnique({ where: { id: saleId }, select: { id: true } });
     if (!sale) throw new Error('SALE_NOT_FOUND');
 
-    if (sale.saleContract) {
-      return sale.saleContract;
-    }
-
-    return prisma.saleContract.create({
-      data: {
+    return prisma.saleContract.upsert({
+      where: { saleId },
+      update: {
+        buyer: payload.buyer,
+        seller: payload.seller,
+        items: payload.items,
+        conditions: payload.conditions,
+        acceptedAt: new Date(),
+      },
+      create: {
         saleId,
         buyer: payload.buyer,
         seller: payload.seller,
@@ -372,7 +377,9 @@ export class ContractService {
 
   /**
    * Retorna o contexto do contrato no formato que o front-end espera.
-   * Prioriza o snapshot salvo; se não existir, deriva dos dados ao vivo da venda.
+   * Quando há snapshot, usa-o como base mas sempre sobrepõe as datas planejadas
+   * com os valores ao vivo de SaleData (authoritative após PATCH /seller-decision).
+   * Se não há snapshot, deriva tudo dos dados ao vivo da venda.
    */
   async getSaleContractContext(saleId: string, sellerId?: string) {
     const sale = await prisma.saleData.findUnique({
@@ -394,6 +401,11 @@ export class ContractService {
         items: snap.items,
         conditions: {
           ...conditions,
+          // Datas planejadas vêm sempre de SaleData (set via PATCH /seller-decision)
+          // para garantir que o contrato reflita o que o vendedor confirmou
+          plannedHarvestDate: saleAny.plannedHarvestDate ?? conditions.plannedHarvestDate ?? null,
+          plannedPickupDate: saleAny.plannedPickupDate ?? conditions.plannedPickupDate ?? null,
+          plannedDeliveryDate: saleAny.plannedDeliveryDate ?? conditions.plannedDeliveryDate ?? null,
           actualDeliveryDate: saleAny.actualDeliveryDate ?? null,
         },
       };
