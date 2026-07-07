@@ -1,7 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 
-const storage = multer.diskStorage({
+const diskStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/');
   },
@@ -11,4 +11,7 @@ const storage = multer.diskStorage({
   }
 });
 
-export const upload = multer({ storage });
+export const upload = multer({ storage: diskStorage });
+
+// Memory storage — necessário para uploads diretos ao S3 (file.buffer disponível)
+export const uploadMemory = multer({ storage: multer.memoryStorage() });

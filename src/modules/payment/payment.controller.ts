@@ -9,7 +9,7 @@ export class PaymentController {
         res: Response
     ): Promise<void> => {
         try {
-            const { saleId, paymentMethodId, productId, title, unit_price, quantity, amount } = req.body;
+            const { saleId, paymentMethodId, productId, title, unit_price, quantity, amount, phase } = req.body;
             if (!saleId || !paymentMethodId || !productId || !title || !unit_price || !quantity || !amount) {
                 res.status(400).json({ error: 'Dados obrigatórios não fornecidos.' });
                 return;
@@ -21,6 +21,7 @@ export class PaymentController {
                 unit_price,
                 quantity,
                 amount,
+                phase,
             });
             res.status(201).json(result);
         } catch (error: any) {
@@ -171,7 +172,7 @@ export class PaymentController {
         res: Response
     ): Promise<void> => {
         try {
-            const { saleId, paymentMethodId, amount, email, expirationMinutes } = req.body;
+            const { saleId, paymentMethodId, amount, email, expirationMinutes, phase } = req.body;
 
             if (!saleId || !paymentMethodId || !amount || !email) {
                 res.status(400).json({
@@ -213,7 +214,8 @@ export class PaymentController {
                 paymentMethodId,
                 amount,
                 email,
-                expirationMinutes
+                expirationMinutes,
+                phase,
             });
 
             res.status(201).json(result);
@@ -231,7 +233,7 @@ export class PaymentController {
         res: Response
     ): Promise<void> => {
         try {
-            const { saleId, paymentMethodId, amount, expirationDays } = req.body;
+            const { saleId, paymentMethodId, amount, expirationDays, phase } = req.body;
 
             if (!saleId || !paymentMethodId || !amount) {
                 res.status(400).json({
@@ -246,7 +248,7 @@ export class PaymentController {
                 return;
             }
 
-            const result = await service.createBoletoPayment({ saleId, paymentMethodId, amount, expirationDays });
+            const result = await service.createBoletoPayment({ saleId, paymentMethodId, amount, expirationDays, phase });
 
             res.status(201).json(result);
         } catch (error: any) {
@@ -287,6 +289,64 @@ export class PaymentController {
                 error: 'Erro ao cancelar pagamento PIX.',
                 message: error.message,
             });
+        }
+    };
+
+    public getFinalInstallmentAmount: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const saleId = req.params.saleId;
+            if (!saleId) {
+                res.status(400).json({ error: 'saleId é obrigatório.' });
+                return;
+            }
+            const result = await service.getFinalInstallmentAmount(saleId);
+            res.json(result);
+        } catch (error: any) {
+            if (error.message?.startsWith('FINAL_INSTALLMENT_NOT_AVAILABLE:')) {
+                res.status(409).json({ error: error.message.split(':')[1], code: 'FINAL_INSTALLMENT_NOT_AVAILABLE' });
+                return;
+            }
+            if (error.message?.includes('não encontrada')) {
+                res.status(404).json({ error: error.message });
+                return;
+            }
+            console.error('Erro ao calcular parcela final:', error);
+            res.status(500).json({ error: 'Erro ao calcular parcela final.', message: error.message });
+        }
+    };
+
+    public createFinalBoleto: RequestHandler = async (
+        req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const { saleId, paymentMethodId, amount, expirationDays } = req.body;
+
+            if (!saleId || !paymentMethodId) {
+                res.status(400).json({
+                    error: 'Dados obrigatórios não fornecidos.',
+                    required: ['saleId', 'paymentMethodId']
+                });
+                return;
+            }
+
+            if (amount !== undefined && (typeof amount !== 'number' || amount <= 0)) {
+                res.status(400).json({ error: 'O valor do pagamento deve ser um número maior que zero.' });
+                return;
+            }
+
+            const result = await service.createFinalBoleto({ saleId, paymentMethodId, amount, expirationDays });
+            res.status(201).json(result);
+        } catch (error: any) {
+            if (error.message?.startsWith('FINAL_BOLETO_BLOCKED:')) {
+                res.status(409).json({ error: error.message.split(':').slice(1).join(':'), code: 'FINAL_BOLETO_BLOCKED' });
+                return;
+            }
+            console.error('Erro ao criar boleto final:', error);
+            res.status(500).json({ error: 'Erro ao criar boleto final.', message: error.message });
         }
     };
 

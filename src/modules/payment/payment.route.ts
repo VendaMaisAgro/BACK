@@ -66,6 +66,8 @@ router.post('/webhook', controller.processWebhook as RequestHandler);
 
 router.use(protectRoute);
 
+// ─── Rotas sem parâmetro dinâmico (devem vir ANTES de /:id) ──────────────────
+
 /**
  * @swagger
  * /payment-methods/preference:
@@ -163,6 +165,17 @@ router.use(protectRoute);
  *                   example: "At least one policy returned UNAUTHORIZED."
  */
 router.post('/preference', controller.createPreference as RequestHandler);
+router.get('/methods', controller.getPaymentMethods as RequestHandler);
+router.post('/pix', controller.createPixPayment as RequestHandler);
+router.post('/boleto', controller.createBoletoPayment as RequestHandler);
+router.post('/final-boleto', controller.createFinalBoleto as RequestHandler);
+router.post('/configure-webhook', controller.configureWebhook as RequestHandler);
+
+// Calcula o valor da segunda parcela — duas formas de URL para compatibilidade com o frontend
+router.get('/sales/:saleId/final-amount', controller.getFinalInstallmentAmount as RequestHandler);
+router.get('/final-amount/:saleId', controller.getFinalInstallmentAmount as RequestHandler);
+
+// ─── Rotas com parâmetro dinâmico (:id) — SEMPRE no final ────────────────────
 
 /**
  * @swagger
@@ -221,6 +234,10 @@ router.post('/preference', controller.createPreference as RequestHandler);
  *                   type: string
  */
 router.get('/:id', controller.getById as RequestHandler);
+router.post('/:id/sync', controller.syncPaymentStatus as RequestHandler);
+router.get('/:id/debug', controller.debugPayment as RequestHandler);
+router.patch('/:id', controller.updatePayment as RequestHandler);
+router.post('/:id/cancel', controller.cancelPixPayment as RequestHandler);
 
 /**
  * @swagger
@@ -301,8 +318,6 @@ router.get('/:id', controller.getById as RequestHandler);
  *       500:
  *         description: Erro ao sincronizar status
  */
-router.post('/:id/sync', controller.syncPaymentStatus as RequestHandler);
-
 /**
  * @swagger
  * /payment-methods/payments/{id}/debug:
@@ -342,8 +357,6 @@ router.post('/:id/sync', controller.syncPaymentStatus as RequestHandler);
  *       500:
  *         description: Erro ao buscar informações de debug
  */
-router.get('/:id/debug', controller.debugPayment as RequestHandler);
-
 /**
  * @swagger
  * /payment-methods/payments/{id}:
@@ -408,8 +421,6 @@ router.get('/:id/debug', controller.debugPayment as RequestHandler);
  *                 message:
  *                   type: string
  */
-router.patch('/:id', controller.updatePayment as RequestHandler);
-
 /**
  * @swagger
  * /payment-methods/methods:
@@ -444,8 +455,6 @@ router.patch('/:id', controller.updatePayment as RequestHandler);
  *       500:
  *         description: Erro ao buscar meios de pagamento
  */
-router.get('/methods', controller.getPaymentMethods as RequestHandler);
-
 /**
  * @swagger
  * /payment-methods/pix:
@@ -537,9 +546,58 @@ router.get('/methods', controller.getPaymentMethods as RequestHandler);
  *       500:
  *         description: Erro ao criar pagamento PIX
  */
-router.post('/pix', controller.createPixPayment as RequestHandler);
-router.post('/boleto', controller.createBoletoPayment as RequestHandler);
-
+/**
+ * @swagger
+ * /payment-methods/final-boleto:
+ *   post:
+ *     summary: Cria o boleto da segunda parcela (70%) — sempre boleto por regra de negócio
+ *     description: >
+ *       Requer que a entrada de 30% já esteja confirmada (downPaymentCompleted=true).
+ *       O `amount` pode ser informado explicitamente para ajustar pelo peso real da carga.
+ *       Se omitido, calcula automaticamente como (total do contrato - entrada paga).
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [saleId, paymentMethodId]
+ *             properties:
+ *               saleId:
+ *                 type: string
+ *               paymentMethodId:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *                 description: Valor ajustado da parcela final (opcional — usa cálculo automático se omitido)
+ *               expirationDays:
+ *                 type: number
+ *                 description: Dias para vencimento do boleto (padrão 3)
+ *     responses:
+ *       201: { description: Boleto final criado com sucesso }
+ *       409: { description: Entrada ainda não confirmada ou boleto já existe }
+ */
+/**
+ * @swagger
+ * /payment-methods/sales/{saleId}/final-amount:
+ *   get:
+ *     summary: Calcula o valor da segunda parcela (70%) para uma venda
+ *     description: Retorna contractTotal, totalDownPaid, finalAmount e se o peso foi registrado
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: saleId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Valores calculados }
+ *       409: { description: Entrada ainda não confirmada }
+ */
 /**
  * @swagger
  * /payment-methods/payments/{id}/cancel:
@@ -590,8 +648,6 @@ router.post('/boleto', controller.createBoletoPayment as RequestHandler);
  *       500:
  *         description: Erro ao cancelar pagamento
  */
-router.post('/:id/cancel', controller.cancelPixPayment as RequestHandler);
-
 /**
  * @swagger
  * /payment-methods/configure-webhook:
@@ -626,6 +682,4 @@ router.post('/:id/cancel', controller.cancelPixPayment as RequestHandler);
  *       500:
  *         description: Erro ao configurar webhook
  */
-router.post('/configure-webhook', controller.configureWebhook as RequestHandler);
-
 export default router;
