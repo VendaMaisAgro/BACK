@@ -120,6 +120,19 @@ export class PaymentController {
         }
     };
 
+    public syncPendingOrderPayments: RequestHandler = async (
+        _req: Request,
+        res: Response
+    ): Promise<void> => {
+        try {
+            const result = await service.syncPendingOrderPayments();
+            res.json({ success: true, ...result });
+        } catch (error: any) {
+            console.error('Erro ao sincronizar pagamentos pendentes:', error);
+            res.status(500).json({ error: 'Erro ao sincronizar pagamentos pendentes.', message: error.message });
+        }
+    };
+
     /**
      * Debug de um pagamento - retorna informações detalhadas
      */

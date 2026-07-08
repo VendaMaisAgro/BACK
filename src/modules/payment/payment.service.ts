@@ -151,6 +151,7 @@ export class PaymentService {
                     total_amount: amount.toFixed(2),
                     external_reference: params.saleId,
                     processing_mode: 'automatic',
+                    notification_url: `${process.env.URL_BACKEND}/payment/webhook`,
                     transactions: {
                         payments: [
                             {
@@ -166,7 +167,7 @@ export class PaymentService {
                     payer: {
                         email: params.email
                     }
-                },
+                } as any,
                 requestOptions: { idempotencyKey }
             });
 
@@ -281,8 +282,9 @@ export class PaymentService {
                 body: {
                     type: 'online',
                     total_amount: amount.toFixed(2),
-                    external_reference: String(sale.orderNumber),
+                    external_reference: params.saleId,
                     processing_mode: 'automatic',
+                    notification_url: `${process.env.URL_BACKEND}/payment/webhook`,
                     transactions: {
                         payments: [
                             {
@@ -839,6 +841,50 @@ export class PaymentService {
             console.error("Erro ao sincronizar status:", message);
             return { success: false, error: message };
         }
+    }
+
+    /**
+     * Verifica todos os pagamentos pendentes via Orders API e confirma os que foram pagos.
+     * Chamado periodicamente pelo scheduler para tratar boletos (compensação não imediata).
+     */
+    async syncPendingOrderPayments(): Promise<{ checked: number; confirmed: number; errors: number }> {
+        const pending = await this.prisma.payment.findMany({
+            where: {
+                status: 'pending',
+                mp_order_id: { not: null },
+            },
+        });
+
+        let confirmed = 0;
+        let errors = 0;
+
+        for (const paymentRecord of pending) {
+            try {
+                const orderData = await orderClient.get({ id: paymentRecord.mp_order_id! });
+                const paymentData = orderData.transactions?.payments?.[0];
+                if (!paymentData?.status) continue;
+
+                const newStatus = this.mapMercadoPagoStatus(paymentData.status as string);
+                if (newStatus !== 'completed') continue;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.payment.update({
+                        where: { id: paymentRecord.id },
+                        data: { mp_payment_id: paymentData.id },
+                    });
+                    await this.applyPaymentCompletion(tx, paymentRecord, newStatus, String(paymentData.id));
+                });
+
+                console.info(`[syncPendingOrderPayments] Pagamento ${paymentRecord.id} confirmado (order: ${paymentRecord.mp_order_id})`);
+                confirmed++;
+            } catch (err: any) {
+                console.warn(`[syncPendingOrderPayments] Erro ao verificar pagamento ${paymentRecord.id}: ${err.message}`);
+                errors++;
+            }
+        }
+
+        console.info(`[syncPendingOrderPayments] Verificados: ${pending.length} | Confirmados: ${confirmed} | Erros: ${errors}`);
+        return { checked: pending.length, confirmed, errors };
     }
 
     async debugPayment(paymentId: string) {

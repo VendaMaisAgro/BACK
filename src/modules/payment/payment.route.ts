@@ -170,6 +170,7 @@ router.post('/pix', controller.createPixPayment as RequestHandler);
 router.post('/boleto', controller.createBoletoPayment as RequestHandler);
 router.post('/final-boleto', controller.createFinalBoleto as RequestHandler);
 router.post('/configure-webhook', controller.configureWebhook as RequestHandler);
+router.post('/sync-pending', controller.syncPendingOrderPayments as RequestHandler);
 
 // Calcula o valor da segunda parcela — duas formas de URL para compatibilidade com o frontend
 router.get('/sales/:saleId/final-amount', controller.getFinalInstallmentAmount as RequestHandler);
