@@ -121,18 +121,34 @@ export class SaleService {
     });
   }
 
-  async getById(id: string) {
+  private computePaymentStatus(sale: {
+    downPaymentCompleted: boolean;
+    paymentCompleted: boolean;
+    Payment?: { phase: string; status: string }[];
+  }) {
+    const payments = sale.Payment ?? [];
+    return {
+      firstInstallmentPaid:
+        sale.downPaymentCompleted ||
+        payments.some(p => (p.phase === 'down_payment' || p.phase === 'full') && p.status === 'completed'),
+      finalPaymentPaid:
+        sale.paymentCompleted ||
+        payments.some(p => (p.phase === 'final_payment' || p.phase === 'full') && p.status === 'completed'),
+    };
+  }
 
+  async getById(id: string) {
     return await this.prisma.$transaction(async (tx) => {
       const sale = await tx.saleData.findUnique({
         where: { id },
         include: {
           boughtProducts: true,
-          Payment: true
+          Payment: true,
         },
       });
 
-      return sale;
+      if (!sale) return null;
+      return { ...sale, ...this.computePaymentStatus(sale) };
     });
   }
 
@@ -206,6 +222,7 @@ export class SaleService {
         transportType: sale.transportType
           ? { id: sale.transportType.id, type: sale.transportType.type, valueFreight: sale.transportType.valueFreight }
           : null,
+        ...this.computePaymentStatus(sale),
       }));
     } catch (error) {
       console.error("Erro ao buscar vendas do produtor:", error);
@@ -230,6 +247,7 @@ export class SaleService {
           shippingAddress: true,
           paymentMethod: true,
           transportType: true,
+          Payment: true,
         },
         orderBy: { createdAt: "desc" },
       });
@@ -291,6 +309,7 @@ export class SaleService {
         transportType: purchase.transportType
           ? { id: purchase.transportType.id, type: purchase.transportType.type, valueFreight: purchase.transportType.valueFreight }
           : null,
+        ...this.computePaymentStatus(purchase),
       }));
     } catch (error) {
       console.error("Erro ao buscar compras do usuário:", error);
@@ -299,6 +318,17 @@ export class SaleService {
   }
 
   async update(id: string, data: UpdateSaleDataDto) {
+    // Guard: não permite trocar o método de pagamento após a entrada ser confirmada
+    if (data.paymentMethodId !== undefined) {
+      const current = await this.prisma.saleData.findUnique({
+        where: { id },
+        select: { downPaymentCompleted: true, paymentCompleted: true },
+      });
+      if (!current) throw new Error(`Venda (id=${id}) não encontrada`);
+      if (current.paymentCompleted) throw new Error('PAYMENT_ALREADY_COMPLETED');
+      if (current.downPaymentCompleted) throw new Error('DOWN_PAYMENT_ALREADY_COMPLETED');
+    }
+
     const isReschedulingDates =
       data.plannedHarvestDate !== undefined ||
       data.plannedPickupDate !== undefined ||
@@ -575,11 +605,229 @@ export class SaleService {
       where: { id: saleId },
       data: {
         actualDeliveryDate: tacitDeadline,
-        status: 'Concluída',
+        status: 'Concluído',
       },
     });
 
     return { applied: true, actualDeliveryDate: tacitDeadline };
+  }
+
+  /**
+   * Autoriza colheita para uma venda.
+   * Requer que o pagamento da entrada (30%) já esteja confirmado.
+   */
+  async authorizeHarvest(saleId: string) {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: saleId },
+      select: { id: true, status: true, downPaymentCompleted: true, sellerApproved: true },
+    });
+    if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+
+    if (!sale.downPaymentCompleted) throw new Error('HARVEST_BLOCKED_NO_DOWN_PAYMENT');
+    if (!sale.sellerApproved) throw new Error('HARVEST_BLOCKED_SELLER_NOT_APPROVED');
+
+    return this.prisma.saleData.update({
+      where: { id: saleId },
+      data: { status: 'Colheita autorizada' },
+      include: { boughtProducts: true },
+    });
+  }
+
+  /**
+   * Altera o método de pagamento da primeira parcela de uma venda.
+   * Cancela todos os pagamentos pendentes no banco antes de atualizar.
+   * Bloqueado se a entrada ou o pagamento final já foram confirmados.
+   */
+  async changePaymentMethod(saleId: string, newPaymentMethodId: string) {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: saleId },
+      select: { id: true, downPaymentCompleted: true, paymentCompleted: true },
+    });
+    if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+    if (sale.paymentCompleted) throw new Error('PAYMENT_ALREADY_COMPLETED');
+    if (sale.downPaymentCompleted) throw new Error('DOWN_PAYMENT_ALREADY_COMPLETED');
+
+    const paymentMethod = await this.prisma.paymentMethod.findUnique({ where: { id: newPaymentMethodId } });
+    if (!paymentMethod) throw new Error(`Método de pagamento (id=${newPaymentMethodId}) não encontrado`);
+
+    return this.prisma.$transaction(async (tx) => {
+      // Cancela pagamentos pendentes para liberar o novo fluxo de pagamento
+      await tx.payment.updateMany({
+        where: { saleId, status: 'pending' },
+        data: { status: 'cancelled', updatedAt: new Date() },
+      });
+
+      return tx.saleData.update({
+        where: { id: saleId },
+        data: { paymentMethodId: newPaymentMethodId },
+        include: { paymentMethod: true },
+      });
+    });
+  }
+
+  /**
+   * Registra o peso manual da carga com comprovante (ticket de balança).
+   * Recalcula o total do contrato com base no peso real e na unidade de venda do produto.
+   * Atualiza status para "Aguardando pagamento final" e persiste adjustedContractTotal.
+   * Operação atômica: documento + peso + status em uma única transação.
+   */
+  async registerManualWeight(params: {
+    saleId: string;
+    uploadedById: string;
+    weightKg: number;
+    fileUrl: string;
+  }) {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: params.saleId },
+      select: {
+        id: true,
+        status: true,
+        weightDocumentId: true,
+        sellerApproved: true,
+        transportValue: true,
+        downPaymentCompleted: true,
+      },
+    });
+    if (!sale) throw new Error(`Venda (id=${params.saleId}) não encontrada`);
+    if (!sale.sellerApproved) throw new Error('WEIGHT_BLOCKED_SELLER_NOT_APPROVED');
+    if (!sale.downPaymentCompleted) throw new Error('WEIGHT_BLOCKED_NO_DOWN_PAYMENT');
+    if (sale.weightDocumentId) throw new Error('WEIGHT_ALREADY_REGISTERED');
+    if (params.weightKg <= 0) throw new Error('Peso deve ser maior que zero');
+
+    const boughtProducts = await this.prisma.boughtProduct.findMany({
+      where: { saleDataId: params.saleId },
+      include: { sellingUnitProduct: { include: { unit: true } } },
+    });
+
+    const adjustedProductsTotal = this.calculateWeightBasedTotal(boughtProducts, params.weightKg);
+    const adjustedContractTotal = adjustedProductsTotal !== null
+      ? parseFloat((adjustedProductsTotal + Number(sale.transportValue)).toFixed(2))
+      : null;
+
+    return this.prisma.$transaction(async (tx) => {
+      const doc = await tx.operationDocument.create({
+        data: {
+          saleId: params.saleId,
+          uploadedById: params.uploadedById,
+          docType: 'ticket_balanca',
+          fileUrl: params.fileUrl,
+        },
+      });
+
+      const updatedSale = await tx.saleData.update({
+        where: { id: params.saleId },
+        data: {
+          cargoWeightKg: params.weightKg,
+          weightDocumentId: doc.id,
+          status: 'Aguardando pagamento final',
+          ...(adjustedContractTotal !== null && { adjustedContractTotal }),
+        },
+        include: { boughtProducts: true },
+      });
+
+      // Atualiza BoughtProduct.value usando a mesma fórmula de calculateWeightBasedTotal (peso × preço/unidade)
+      if (adjustedProductsTotal !== null && boughtProducts.length > 0) {
+        if (boughtProducts.length === 1) {
+          await tx.boughtProduct.update({
+            where: { id: boughtProducts[0].id },
+            data: { value: adjustedProductsTotal },
+          });
+        } else {
+          const originalTotal = boughtProducts.reduce((sum, bp) => sum + bp.value, 0);
+          if (originalTotal > 0) {
+            for (const bp of boughtProducts) {
+              const kgPerUnit = this.getKgPerUnit(bp.sellingUnitProduct.unit.unit);
+              if (kgPerUnit === null) continue;
+              const proportion = bp.value / originalTotal;
+              const productWeightKg = params.weightKg * proportion;
+              const newValue = parseFloat(((productWeightKg / kgPerUnit) * bp.sellingUnitProduct.minPrice).toFixed(2));
+              await tx.boughtProduct.update({
+                where: { id: bp.id },
+                data: { value: newValue },
+              });
+            }
+          }
+        }
+      }
+
+      return {
+        document: doc,
+        sale: updatedSale,
+        adjustedContractTotal,
+        weightCalculated: adjustedContractTotal !== null,
+      };
+    });
+  }
+
+  /**
+   * Converte kg para a unidade de venda e multiplica pelo preço.
+   * Retorna null se alguma unidade não for reconhecida como peso.
+   */
+  private calculateWeightBasedTotal(
+    boughtProducts: Array<{
+      value: number;
+      amount: number;
+      sellingUnitProduct: { minPrice: number; unit: { unit: string } };
+    }>,
+    totalWeightKg: number
+  ): number | null {
+    if (boughtProducts.length === 0) return null;
+
+    if (boughtProducts.length === 1) {
+      const bp = boughtProducts[0];
+      const kgPerUnit = this.getKgPerUnit(bp.sellingUnitProduct.unit.unit);
+      if (kgPerUnit === null) return null;
+      return parseFloat(((totalWeightKg / kgPerUnit) * bp.sellingUnitProduct.minPrice).toFixed(2));
+    }
+
+    // Múltiplos produtos: distribui o peso proporcionalmente pelo valor original
+    const originalTotal = boughtProducts.reduce((sum, bp) => sum + bp.value, 0);
+    if (originalTotal === 0) return null;
+
+    let newTotal = 0;
+    for (const bp of boughtProducts) {
+      const kgPerUnit = this.getKgPerUnit(bp.sellingUnitProduct.unit.unit);
+      if (kgPerUnit === null) return null;
+      const proportion = bp.value / originalTotal;
+      const productWeightKg = totalWeightKg * proportion;
+      newTotal += (productWeightKg / kgPerUnit) * bp.sellingUnitProduct.minPrice;
+    }
+    return parseFloat(newTotal.toFixed(2));
+  }
+
+  /** Retorna quantos kg equivalem a 1 unidade de venda, ou null se desconhecida. */
+  private getKgPerUnit(unit: string): number | null {
+    const u = unit.toLowerCase().trim();
+    if (['kg', 'quilograma', 'quilogramas', 'kilo', 'kilos'].includes(u)) return 1;
+    if (['ton', 't', 'tonelada', 'toneladas'].includes(u)) return 1000;
+    if (['saca', 'sc', 'sacas', 'saco', 'sacos'].includes(u)) return 60;
+    if (['arroba', 'arrobas', '@'].includes(u)) return 15;
+    if (['g', 'grama', 'gramas'].includes(u)) return 0.001;
+    return null;
+  }
+
+  /**
+   * Aplica multa por inadimplência da parcela final e cancela a venda.
+   */
+  async applyPenalty(saleId: string, params: { penaltyAmount?: number; reason: string }) {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: saleId },
+      select: { id: true, status: true, paymentCompleted: true, penaltyApplied: true },
+    });
+    if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+    if (sale.paymentCompleted) throw new Error('PENALTY_BLOCKED:Pagamento final já confirmado, multa não aplicável');
+    if (sale.penaltyApplied) throw new Error('PENALTY_ALREADY_APPLIED');
+
+    return this.prisma.saleData.update({
+      where: { id: saleId },
+      data: {
+        penaltyApplied: true,
+        penaltyAmount: params.penaltyAmount ?? null,
+        penaltyReason: params.reason,
+        status: 'Cancelado',
+      },
+      include: { boughtProducts: true },
+    });
   }
 
   /**
@@ -593,7 +841,7 @@ export class SaleService {
       where: {
         actualDeliveryDate: null,
         plannedDeliveryDate: { lt: now },
-        status: { notIn: ['Concluída', 'Recusado pelo vendedor', 'Cancelado'] },
+        status: { notIn: ['Concluído', 'Concluída', 'Recusado pelo vendedor', 'Cancelado'] },
       },
       select: { id: true, plannedDeliveryDate: true },
     });

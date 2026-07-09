@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum AcceptanceRole {
@@ -131,11 +132,12 @@ model PaymentMethod {
 }
 
 model Payment {
-  id               String @id @default(uuid())
+  id               String   @id @default(uuid())
   saleId           String
   paymentMethodId  String
   amount           Float
   status           String
+  phase            String   @default("full") // "down_payment" | "final_payment" | "full"
   mp_preference_id String?
   mp_payment_id    String?
   mp_order_id      String?
@@ -195,6 +197,12 @@ model SaleData {
   actualDeliveryDate         DateTime? @map("actual_delivery_date")
   technicalSpec       String?   @map("technical_spec")
   certifierRequired   Boolean?  @map("certifier_required")
+  downPaymentCompleted  Boolean  @default(false) @map("down_payment_completed")
+  weightDocumentId      String?  @map("weight_document_id")
+  adjustedContractTotal Float?   @map("adjusted_contract_total")
+  penaltyApplied        Boolean  @default(false) @map("penalty_applied")
+  penaltyAmount         Decimal? @db.Decimal(10, 2) @map("penalty_amount")
+  penaltyReason         String?  @map("penalty_reason")
 
   conformityCertifier ConformityCertifier?
   operationDocuments  OperationDocument[]

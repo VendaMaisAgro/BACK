@@ -2,6 +2,7 @@ import express from "express";
 import { SaleController } from "./sales.controller";
 import { protectRoute } from "../../middlewares/auth.middleware";
 import { requireAddress } from "../../middlewares/requireAddress.middleware";
+import { uploadMemory } from "../../middlewares/upload";
 import { RequestHandler } from "express";
 
 const router = express.Router();
@@ -75,9 +76,6 @@ router.use(protectRoute as RequestHandler);
  *           nullable: true
  *           description: "Decisão do vendedor: true=aceito, false=recusado, null=pendente"
  *           example: null
- *         status:
- *           type: string
- *           example: "Pedido realizado!"
  *         addressId:
  *           type: string
  *           format: uuid
@@ -89,7 +87,51 @@ router.use(protectRoute as RequestHandler);
  *           format: uuid
  *         paymentCompleted:
  *           type: boolean
+ *           description: true quando o pagamento final (70%) foi confirmado pelo Mercado Pago
  *           example: false
+ *         downPaymentCompleted:
+ *           type: boolean
+ *           description: true quando a entrada (30%) foi confirmada pelo Mercado Pago
+ *           example: false
+ *         firstInstallmentPaid:
+ *           type: boolean
+ *           description: "[Computed] true se a entrada foi paga (downPaymentCompleted ou payment com phase=down_payment e status=completed)"
+ *           readOnly: true
+ *           example: false
+ *         finalPaymentPaid:
+ *           type: boolean
+ *           description: "[Computed] true se o pagamento final foi pago (paymentCompleted ou payment com phase=final_payment/full e status=completed)"
+ *           readOnly: true
+ *           example: false
+ *         adjustedContractTotal:
+ *           type: number
+ *           nullable: true
+ *           description: Valor total ajustado após pesagem real (inclui frete). Null se peso não foi registrado.
+ *           example: 9234.50
+ *         penaltyApplied:
+ *           type: boolean
+ *           description: true se multa por inadimplência foi aplicada
+ *           example: false
+ *         penaltyAmount:
+ *           type: number
+ *           nullable: true
+ *           description: Valor da multa em reais
+ *           example: 150.00
+ *         penaltyReason:
+ *           type: string
+ *           nullable: true
+ *           description: Motivo da multa
+ *           example: "Atraso no pagamento da segunda parcela"
+ *         status:
+ *           type: string
+ *           description: >
+ *             Status atual da venda. Sequência do fluxo: "Pedido realizado!" →
+ *             "Aprovado pelo vendedor" | "Recusado pelo vendedor" → "Entrada confirmada" →
+ *             "Colheita autorizada" → "Aguardando pagamento final" → "Concluído".
+ *             Outros valores: "Em processamento", "Disponível para entrega", "Entregue", "Cancelado".
+ *             O status "Concluído" é atribuído tanto pela confirmação do pagamento final (webhook/polling)
+ *             quanto pelo aceite tácito de entrega (Cláusula 5).
+ *           example: "Pedido realizado!"
  *         boughtProducts:
  *           type: array
  *           items:
@@ -329,5 +371,127 @@ router.post("/:id/tacit-acceptance", controller.tacitAcceptance as RequestHandle
  *       200: { description: Resultado do processamento em lote }
  */
 router.post("/batch-tacit-acceptance", controller.batchTacitAcceptance as RequestHandler);
+
+/**
+ * @swagger
+ * /sales/{id}/authorize-harvest:
+ *   patch:
+ *     summary: Autoriza a colheita de uma venda após confirmação da entrada (30%)
+ *     description: Bloqueado se downPaymentCompleted=false ou se o vendedor ainda não aprovou o pedido.
+ *     tags: [Sales]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: Colheita autorizada }
+ *       409: { description: Entrada não confirmada ou vendedor não aprovou }
+ */
+router.patch("/:id/authorize-harvest", controller.authorizeHarvest as RequestHandler);
+
+/**
+ * @swagger
+ * /sales/{id}/payment-method:
+ *   patch:
+ *     summary: Altera o método de pagamento da primeira parcela (entrada 30%)
+ *     description: Cancela pagamentos pendentes e atualiza o método. Bloqueado após a entrada ser confirmada.
+ *     tags: [Sales]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [paymentMethodId]
+ *             properties:
+ *               paymentMethodId:
+ *                 type: string
+ *                 format: uuid
+ *     responses:
+ *       200: { description: Método de pagamento atualizado }
+ *       409: { description: Entrada ou pagamento final já confirmado }
+ */
+router.patch("/:id/payment-method", controller.changePaymentMethod as RequestHandler);
+
+/**
+ * @swagger
+ * /sales/{id}/weight:
+ *   post:
+ *     summary: Registra o peso real da carga com upload do ticket de balança para o S3
+ *     description: >
+ *       Operação atômica: cria OperationDocument (ticket_balanca) e atualiza cargoWeightKg + weightDocumentId na venda.
+ *       Aceita multipart/form-data com campo 'file' (imagem ou PDF) e 'weightKg' (número).
+ *       Bloqueado se já houver um peso registrado — para corrigir contate o suporte.
+ *     tags: [Sales]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [file, weightKg]
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Foto ou PDF do ticket de balança
+ *               weightKg:
+ *                 type: number
+ *                 description: Peso real da carga em kg
+ *                 example: 9500.5
+ *     responses:
+ *       201: { description: Peso registrado e documento salvo no S3 }
+ *       409: { description: Peso já registrado ou vendedor não aprovou }
+ *       400: { description: Arquivo ou weightKg ausente/inválido }
+ */
+router.post("/:id/weight", uploadMemory.single("file"), controller.registerWeight as RequestHandler);
+
+/**
+ * @swagger
+ * /sales/{id}/apply-penalty:
+ *   patch:
+ *     summary: Aplica multa por inadimplência e cancela a venda
+ *     description: >
+ *       Define penaltyApplied=true, penaltyAmount e penaltyReason na venda e altera o status para "Cancelado".
+ *       Bloqueado se o pagamento final já foi confirmado ou se multa já foi aplicada.
+ *     tags: [Sales]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 description: Motivo da multa
+ *               penaltyAmount:
+ *                 type: number
+ *                 description: Valor da multa em reais (opcional)
+ *                 example: 150.00
+ *     responses:
+ *       200: { description: Multa aplicada e venda cancelada }
+ *       400: { description: reason ausente ou penaltyAmount inválido }
+ *       409: { description: Multa já aplicada ou pagamento final já confirmado }
+ *       404: { description: Venda não encontrada }
+ */
+router.patch("/:id/apply-penalty", controller.applyPenalty as RequestHandler);
 
 export default router;

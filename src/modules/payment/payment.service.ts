@@ -1,6 +1,5 @@
 import { Payment, PrismaClient } from '@prisma/client';
 import { MercadoPagoConfig, Preference, Payment as MPPayment, PaymentMethod, Order } from 'mercadopago';
-import type { PaymentResponse } from 'mercadopago/dist/clients/payment/commonTypes';
 import { randomUUID } from 'crypto';
 import 'dotenv/config';
 
@@ -9,6 +8,8 @@ const preference = new Preference(client);
 const mpPayment = new MPPayment(client);
 const paymentMethod = new PaymentMethod(client);
 const orderClient = new Order(client);
+
+type PaymentPhase = 'down_payment' | 'final_payment' | 'full';
 
 export class PaymentService {
     private readonly prisma: PrismaClient;
@@ -23,9 +24,22 @@ export class PaymentService {
         unit_price: number;
         quantity: number;
         amount: number;
+        phase?: PaymentPhase;
     }) {
         try {
-            console.info(`[createPreference] Criando preferência de pagamento para venda ${params.saleId}`);
+            const phase = params.phase ?? 'full';
+            console.info(`[createPreference] Criando preferência de pagamento para venda ${params.saleId} (fase: ${phase})`);
+
+            // Quando é entrada, recalcula o unit_price e amount server-side
+            let unit_price = params.unit_price;
+            let amount = params.amount;
+            if (phase === 'down_payment') {
+                const calc = await this.calculateDownPaymentAmount(params.saleId);
+                amount = calc.amount;
+                // unit_price para o MP = valor total da entrada (quantity mantida em 1)
+                unit_price = calc.amount;
+                console.info(`[createPreference] Valor da entrada calculado: ${calc.percent}% de R$${calc.contractTotal} = R$${amount}`);
+            }
 
             const response = await preference.create({
                 body: {
@@ -33,8 +47,8 @@ export class PaymentService {
                         {
                             id: params.saleId,
                             title: params.title,
-                            quantity: params.quantity,
-                            unit_price: params.unit_price
+                            quantity: 1,
+                            unit_price: amount // quantity é sempre 1; usar amount garante que MP cobra o mesmo valor armazenado no banco
                         }
                     ],
                     back_urls: {
@@ -43,7 +57,6 @@ export class PaymentService {
                         pending: `${process.env.URL_BACKEND}/payment/pendente`
                     },
                     notification_url: `${process.env.URL_BACKEND}/payment/webhook`,
-
                     external_reference: params.saleId
                 }
             });
@@ -52,8 +65,9 @@ export class PaymentService {
                 data: {
                     saleId: params.saleId,
                     paymentMethodId: params.paymentMethodId,
-                    amount: params.amount,
+                    amount,
                     status: 'pending',
+                    phase,
                     mp_preference_id: response.id,
                 }
             });
@@ -71,15 +85,30 @@ export class PaymentService {
         }
     }
 
+    /**
+     * Calcula o valor da entrada (down_payment) a partir do total da venda e do percentual configurado.
+     * Usa downPaymentPercent da venda ou 30% como padrão.
+     */
+    private async calculateDownPaymentAmount(saleId: string): Promise<{ amount: number; contractTotal: number; percent: number }> {
+        const sale = await this.prisma.saleData.findUnique({
+            where: { id: saleId },
+            include: { boughtProducts: true },
+        });
+        if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+
+        const contractTotal = sale.boughtProducts.reduce((sum, bp) => sum + bp.value, 0) + Number(sale.transportValue);
+        const percent = sale.downPaymentPercent ?? 30;
+        const amount = parseFloat((contractTotal * percent / 100).toFixed(2));
+
+        return { amount, contractTotal, percent };
+    }
+
     async getById(paymentId: string): Promise<Payment | null> {
         return this.prisma.payment.findUnique({
             where: { id: paymentId }
         });
     }
 
-    /**
-     * Lista todos os meios de pagamento disponíveis
-     */
     async getPaymentMethods() {
         try {
             console.info('[getPaymentMethods] Buscando meios de pagamento disponíveis');
@@ -91,23 +120,25 @@ export class PaymentService {
         }
     }
 
-    /**
-     * Cria um pagamento PIX usando a Orders API (Checkout Transparente)
-     * @param params.saleId - ID da venda
-     * @param params.paymentMethodId - ID do método de pagamento no banco local
-     * @param params.amount - Valor do pagamento
-     * @param params.email - Email do pagador
-     * @param params.expirationMinutes - Tempo de expiração em minutos (opcional, padrão: 30 minutos)
-     */
     async createPixPayment(params: {
         saleId: string;
         paymentMethodId: string;
         amount: number;
         email: string;
         expirationMinutes?: number;
+        phase?: PaymentPhase;
     }) {
         try {
-            console.info(`[createPixPayment] Criando pagamento PIX para venda ${params.saleId}`);
+            const phase = params.phase ?? 'full';
+            console.info(`[createPixPayment] Criando pagamento PIX para venda ${params.saleId} (fase: ${phase})`);
+
+            // Quando é entrada, ignora o amount do cliente e calcula server-side
+            let amount = params.amount;
+            if (phase === 'down_payment') {
+                const calc = await this.calculateDownPaymentAmount(params.saleId);
+                amount = calc.amount;
+                console.info(`[createPixPayment] Valor da entrada calculado: ${calc.percent}% de R$${calc.contractTotal} = R$${amount}`);
+            }
 
             const expirationMinutes = params.expirationMinutes || 30;
             const expirationTime = `PT${expirationMinutes}M`;
@@ -116,13 +147,13 @@ export class PaymentService {
             const orderResponse = await orderClient.create({
                 body: {
                     type: 'online',
-                    total_amount: params.amount.toFixed(2),
+                    total_amount: amount.toFixed(2),
                     external_reference: params.saleId,
                     processing_mode: 'automatic',
                     transactions: {
                         payments: [
                             {
-                                amount: params.amount.toFixed(2),
+                                amount: amount.toFixed(2),
                                 payment_method: {
                                     id: 'pix',
                                     type: 'bank_transfer'
@@ -134,7 +165,7 @@ export class PaymentService {
                     payer: {
                         email: params.email
                     }
-                },
+                } as any,
                 requestOptions: { idempotencyKey }
             });
 
@@ -147,8 +178,9 @@ export class PaymentService {
                 data: {
                     saleId: params.saleId,
                     paymentMethodId: params.paymentMethodId,
-                    amount: params.amount,
+                    amount,
                     status: 'pending',
+                    phase,
                     mp_order_id: orderResponse.id,
                     mp_payment_id: paymentData.id,
                 }
@@ -160,6 +192,7 @@ export class PaymentService {
                 paymentId: payment.id,
                 orderId: orderResponse.id,
                 orderStatus: orderResponse.status,
+                phase,
                 payment: {
                     id: paymentData.id,
                     status: paymentData.status,
@@ -181,9 +214,19 @@ export class PaymentService {
         paymentMethodId: string;
         amount: number;
         expirationDays?: number;
+        phase?: PaymentPhase;
     }) {
         try {
-            console.info(`[createBoletoPayment] Criando pagamento com boleto para venda ${params.saleId}`);
+            const phase = params.phase ?? 'full';
+            console.info(`[createBoletoPayment] Criando pagamento com boleto para venda ${params.saleId} (fase: ${phase})`);
+
+            // Quando é entrada, ignora o amount do cliente e calcula server-side
+            let amount = params.amount;
+            if (phase === 'down_payment') {
+                const calc = await this.calculateDownPaymentAmount(params.saleId);
+                amount = calc.amount;
+                console.info(`[createBoletoPayment] Valor da entrada calculado: ${calc.percent}% de R$${calc.contractTotal} = R$${amount}`);
+            }
 
             const sale = await this.prisma.saleData.findUnique({
                 where: { id: params.saleId },
@@ -236,13 +279,13 @@ export class PaymentService {
             const orderResponse = await orderClient.create({
                 body: {
                     type: 'online',
-                    total_amount: params.amount.toFixed(2),
-                    external_reference: String(sale.orderNumber),
+                    total_amount: amount.toFixed(2),
+                    external_reference: params.saleId,
                     processing_mode: 'automatic',
-                    transactions: {
+                                    transactions: {
                         payments: [
                             {
-                                amount: params.amount.toFixed(2),
+                                amount: amount.toFixed(2),
                                 payment_method: {
                                     id: 'boleto',
                                     type: 'ticket'
@@ -281,8 +324,9 @@ export class PaymentService {
                 data: {
                     saleId: params.saleId,
                     paymentMethodId: params.paymentMethodId,
-                    amount: params.amount,
+                    amount,
                     status: 'pending',
+                    phase,
                     mp_order_id: orderResponse.id,
                     mp_payment_id: paymentData.id,
                 }
@@ -294,6 +338,7 @@ export class PaymentService {
                 paymentId: payment.id,
                 orderId: orderResponse.id,
                 orderStatus: orderResponse.status,
+                phase,
                 payment: {
                     id: paymentData.id,
                     status: paymentData.status,
@@ -312,6 +357,116 @@ export class PaymentService {
         }
     }
 
+    /**
+     * Calcula o valor da segunda parcela com base no total contratado menos o que já foi pago como entrada.
+     * O operador pode usar esse valor para decidir se ajusta manualmente antes de emitir o boleto final.
+     */
+    async getFinalInstallmentAmount(saleId: string) {
+        const sale = await this.prisma.saleData.findUnique({
+            where: { id: saleId },
+            include: {
+                boughtProducts: true,
+                Payment: true,
+            },
+        });
+
+        if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+
+        if (!sale.downPaymentCompleted) {
+            throw new Error('FINAL_INSTALLMENT_NOT_AVAILABLE:A entrada de 30% ainda não foi confirmada');
+        }
+
+        // Usa o total ajustado pela pesagem se disponível; caso contrário usa o total original do contrato
+        const originalTotal = sale.boughtProducts.reduce((sum, bp) => sum + bp.value, 0) + Number(sale.transportValue);
+        const adjustedContractTotal = sale.adjustedContractTotal !== null
+            ? Number(sale.adjustedContractTotal)
+            : null;
+        const contractTotal = adjustedContractTotal ?? originalTotal;
+
+        const totalDownPaid = sale.Payment
+            .filter(p => p.phase === 'down_payment' && p.status === 'completed')
+            .reduce((sum, p) => sum + p.amount, 0);
+
+        const finalAmount = Math.max(0, contractTotal - totalDownPaid);
+
+        return {
+            saleId,
+            originalTotal,
+            contractTotal,
+            adjustedByWeight: adjustedContractTotal !== null,
+            totalDownPaid,
+            finalAmount,
+            cargoWeightKg: sale.cargoWeightKg ? Number(sale.cargoWeightKg) : null,
+            weightRegistered: !!sale.cargoWeightKg,
+        };
+    }
+
+    /**
+     * Cria o boleto da segunda parcela (70%).
+     * A segunda parcela é SEMPRE boleto por definição de negócio.
+     * Se amount for informado explicitamente (ajuste por peso real), esse valor é usado.
+     * Caso contrário, calcula automaticamente como contractTotal - downPaymentPaid.
+     */
+    async createFinalBoleto(params: {
+        saleId: string;
+        paymentMethodId: string;
+        amount?: number;
+        expirationDays?: number;
+    }) {
+        const sale = await this.prisma.saleData.findUnique({
+            where: { id: params.saleId },
+            include: { boughtProducts: true, Payment: true },
+        });
+
+        if (!sale) throw new Error(`Venda (id=${params.saleId}) não encontrada`);
+        if (!sale.downPaymentCompleted) throw new Error('FINAL_BOLETO_BLOCKED:A entrada de 30% ainda não foi confirmada');
+        if (sale.paymentCompleted) throw new Error('FINAL_BOLETO_BLOCKED:O pagamento final já foi concluído');
+
+        const alreadyHasPendingFinal = sale.Payment.some(
+            p => p.phase === 'final_payment' && p.status === 'pending'
+        );
+        if (alreadyHasPendingFinal) {
+            throw new Error('FINAL_BOLETO_BLOCKED:Já existe um boleto final pendente para esta venda');
+        }
+
+        let amount = params.amount;
+        if (amount === undefined) {
+            // Prefere o total ajustado pela pesagem; caso contrário usa o total original
+            const originalTotal = sale.boughtProducts.reduce((sum, bp) => sum + bp.value, 0) + Number(sale.transportValue);
+            const adjustedContractTotal = sale.adjustedContractTotal !== null
+                ? Number(sale.adjustedContractTotal)
+                : null;
+            const contractTotal = adjustedContractTotal ?? originalTotal;
+            const totalDownPaid = sale.Payment
+                .filter(p => p.phase === 'down_payment' && p.status === 'completed')
+                .reduce((sum, p) => sum + p.amount, 0);
+            amount = Math.max(0, contractTotal - totalDownPaid);
+        }
+
+        if (amount <= 0) throw new Error('FINAL_BOLETO_BLOCKED:Valor calculado para o boleto final é zero ou negativo');
+
+        return this.createBoletoPayment({
+            saleId: params.saleId,
+            paymentMethodId: params.paymentMethodId,
+            amount,
+            expirationDays: params.expirationDays,
+            phase: 'final_payment',
+        });
+    }
+
+    /**
+     * Cancela todos os pagamentos pendentes de uma venda no banco de dados.
+     * Usado ao trocar a forma de pagamento antes da entrada ser confirmada.
+     */
+    async cancelPendingPaymentsBySale(saleId: string): Promise<number> {
+        const result = await this.prisma.payment.updateMany({
+            where: { saleId, status: 'pending' },
+            data: { status: 'cancelled', updatedAt: new Date() },
+        });
+        console.info(`[cancelPendingPaymentsBySale] ${result.count} pagamento(s) pendente(s) cancelado(s) para venda ${saleId}`);
+        return result.count;
+    }
+
     async updatePayment(paymentId: string, data: Partial<Payment>) {
         return this.prisma.payment.update({
             where: { id: paymentId },
@@ -321,7 +476,6 @@ export class PaymentService {
 
     private mapMercadoPagoStatus(mpStatus: string): string {
         const statusMap: Record<string, string> = {
-            // Status da Payment API (antiga)
             'approved': 'completed',
             'pending': 'pending',
             'in_process': 'pending',
@@ -329,15 +483,57 @@ export class PaymentService {
             'cancelled': 'cancelled',
             'refunded': 'refunded',
             'charged_back': 'refunded',
-
-            // Status da Orders API (nova)
-            'action_required': 'pending',  // Aguardando ação do usuário (ex: pagar PIX)
-            'processed': 'completed',       // Order processada com sucesso
-            'expired': 'failed',            // Order expirada
+            'action_required': 'pending',
+            'processed': 'completed',
+            'expired': 'failed',
             'cancelled_by_payer': 'cancelled',
             'cancelled_by_seller': 'cancelled'
         };
         return statusMap[mpStatus] || 'pending';
+    }
+
+    /**
+     * Aplica as atualizações atomicamente no Payment e SaleData após confirmação.
+     * Respeita a fase: down_payment → downPaymentCompleted; final_payment/full → paymentCompleted.
+     */
+    private async applyPaymentCompletion(
+        tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+        paymentRecord: Payment,
+        newStatus: string,
+        mpPaymentId?: string
+    ) {
+        await tx.payment.update({
+            where: { id: paymentRecord.id },
+            data: {
+                status: newStatus,
+                ...(mpPaymentId && { mp_payment_id: mpPaymentId }),
+                updatedAt: new Date()
+            }
+        });
+
+        if (newStatus === 'completed') {
+            if (paymentRecord.phase === 'down_payment') {
+                console.info(`[applyPaymentCompletion] Entrada confirmada para venda ${paymentRecord.saleId}`);
+                await tx.saleData.update({
+                    where: { id: paymentRecord.saleId },
+                    data: { downPaymentCompleted: true, status: 'Entrada confirmada' },
+                });
+            } else if (paymentRecord.phase === 'full') {
+                // Pagamento único: quita entrada e total ao mesmo tempo
+                console.info(`[applyPaymentCompletion] Pagamento único (full) confirmado para venda ${paymentRecord.saleId}`);
+                await tx.saleData.update({
+                    where: { id: paymentRecord.saleId },
+                    data: { downPaymentCompleted: true, paymentCompleted: true, status: 'Concluído' },
+                });
+            } else {
+                // final_payment
+                console.info(`[applyPaymentCompletion] Pagamento final confirmado para venda ${paymentRecord.saleId}`);
+                await tx.saleData.update({
+                    where: { id: paymentRecord.saleId },
+                    data: { paymentCompleted: true, status: 'Concluído' },
+                });
+            }
+        }
     }
 
     async processWebhook(data: any) {
@@ -353,7 +549,6 @@ export class PaymentService {
                 return { error: "Webhook sem ID de recurso válido" };
             }
 
-            // Se for webhook de Order (começa com "ORD"), processa diferente
             if (topic === 'order' || resourceId.startsWith('ORD')) {
                 return this.processOrderWebhook(resourceId, data);
             }
@@ -397,15 +592,11 @@ export class PaymentService {
                             message: "Webhook recebido mas pagamento ainda não processado pelo MP"
                         };
                     }
-
                 } catch (searchError: any) {
                     console.error("Erro ao buscar pagamentos:", searchError.message);
                     return { error: "Erro ao buscar pagamentos no Mercado Pago" };
                 }
-
-            }
-
-            else {
+            } else {
                 try {
                     mpPaymentData = await mpPayment.get({ id: resourceId });
                     const saleId = mpPaymentData.external_reference;
@@ -420,7 +611,6 @@ export class PaymentService {
                             where: { mp_payment_id: String(resourceId) }
                         });
                     }
-
                 } catch (mpError: any) {
                     console.error("Erro ao buscar pagamento:", mpError.message);
                     return { error: "Erro ao buscar pagamento no Mercado Pago" };
@@ -441,32 +631,9 @@ export class PaymentService {
 
             if (paymentRecord.status !== newStatus) {
                 console.info(`[Webhook] Atualizando pagamento ${paymentRecord.id}: ${paymentRecord.status} -> ${newStatus}`);
-
-                // Usa transação para garantir atomicidade entre atualização do pagamento e da venda
                 await this.prisma.$transaction(async (tx) => {
-                    // Atualiza o status do pagamento
-                    await tx.payment.update({
-                        where: { id: paymentRecord.id },
-                        data: {
-                            status: newStatus,
-                            mp_payment_id: String(mpPaymentData.id),
-                            updatedAt: new Date()
-                        }
-                    });
-
-                    // Se o pagamento foi completado, atualiza a venda
-                    if (newStatus === 'completed') {
-                        console.info(`[Webhook] Pagamento completado! Atualizando venda ${paymentRecord.saleId}`);
-                        await tx.saleData.update({
-                            where: { id: paymentRecord.saleId },
-                            data: {
-                                status: 'Pagamento confirmado!',
-                                paymentCompleted: true
-                            }
-                        });
-                    }
+                    await this.applyPaymentCompletion(tx, paymentRecord!, newStatus, String(mpPaymentData.id));
                 });
-
                 console.info(`[Webhook] Pagamento ${paymentRecord.id} atualizado com sucesso`);
             } else {
                 console.info(`[Webhook] Status do pagamento ${paymentRecord.id} não mudou (${paymentRecord.status}), nenhuma atualização necessária`);
@@ -476,12 +643,12 @@ export class PaymentService {
                 success: true,
                 paymentId: paymentRecord.id,
                 saleId: paymentRecord.saleId,
+                phase: paymentRecord.phase,
                 status: newStatus,
                 mp_payment_id: mpPaymentData.id,
                 mp_status: mpPaymentData.status,
                 mp_status_detail: mpPaymentData.status_detail
             };
-
         } catch (error: any) {
             console.error("Erro crítico no webhook:", error.message);
             console.error("Stack:", error.stack);
@@ -489,16 +656,12 @@ export class PaymentService {
         }
     }
 
-    /**
-     * Processa webhooks da Orders API (PIX e outros pagamentos do Checkout Transparente)
-     */
-    private async processOrderWebhook(orderId: string, webhookData: any) {
+    private async processOrderWebhook(orderId: string, _webhookData: any) {
         try {
             console.info(`[processOrderWebhook] Processando webhook para Order ${orderId}`);
 
             await new Promise(resolve => setTimeout(resolve, 1500));
 
-            // Busca a order no Mercado Pago
             let orderData: any;
             try {
                 orderData = await orderClient.get({ id: orderId });
@@ -513,13 +676,11 @@ export class PaymentService {
                 return { error: 'Order sem external_reference' };
             }
 
-            // Busca o pagamento no banco pelo external_reference (saleId ou orderNumber) ou mp_order_id
             let paymentRecord = await this.prisma.payment.findFirst({
                 where: {
                     OR: [
                         { saleId: externalReference },
                         { mp_order_id: orderId },
-                        // external_reference pode ser orderNumber (número inteiro como string)
                         ...(!isNaN(Number(externalReference)) ? [{
                             sale: { orderNumber: parseInt(externalReference) }
                         }] : [])
@@ -533,7 +694,6 @@ export class PaymentService {
                 return { error: 'Payment não encontrado no banco' };
             }
 
-            // Extrai dados do pagamento da order
             const paymentData = orderData.transactions?.payments?.[0];
             if (!paymentData) {
                 console.warn('[processOrderWebhook] Order sem dados de pagamento');
@@ -543,7 +703,6 @@ export class PaymentService {
                 };
             }
 
-            // Mapeia o status do pagamento
             const newStatus = this.mapMercadoPagoStatus(paymentData.status);
 
             if (paymentRecord.status !== newStatus) {
@@ -551,26 +710,10 @@ export class PaymentService {
 
                 await this.prisma.$transaction(async (tx) => {
                     await tx.payment.update({
-                        where: { id: paymentRecord.id },
-                        data: {
-                            status: newStatus,
-                            mp_order_id: orderId,
-                            mp_payment_id: paymentData.id,
-                            updatedAt: new Date()
-                        }
+                        where: { id: paymentRecord!.id },
+                        data: { mp_order_id: orderId, mp_payment_id: paymentData.id }
                     });
-
-                    // Se o pagamento foi completado, atualiza a venda
-                    if (newStatus === 'completed') {
-                        console.info(`[processOrderWebhook] Pagamento completado! Atualizando venda ${paymentRecord.saleId}`);
-                        await tx.saleData.update({
-                            where: { id: paymentRecord.saleId },
-                            data: {
-                                status: 'Pagamento confirmado!',
-                                paymentCompleted: true
-                            }
-                        });
-                    }
+                    await this.applyPaymentCompletion(tx, paymentRecord!, newStatus);
                 });
 
                 console.info(`[processOrderWebhook] Pagamento ${paymentRecord.id} atualizado com sucesso`);
@@ -583,12 +726,12 @@ export class PaymentService {
                 paymentId: paymentRecord.id,
                 saleId: paymentRecord.saleId,
                 orderId: orderId,
+                phase: paymentRecord.phase,
                 status: newStatus,
                 mp_payment_id: paymentData.id,
                 mp_status: paymentData.status,
                 mp_status_detail: paymentData.status_detail
             };
-
         } catch (error: any) {
             console.error('[processOrderWebhook] Erro crítico:', error.message);
             console.error('Stack:', error.stack);
@@ -609,21 +752,6 @@ export class PaymentService {
 
             let mpPaymentData: any = null;
 
-            // Se tiver mp_order_id, é um pagamento da Orders API (PIX via Checkout Transparente)
-            // Comentado temporariamente até gerar o cliente Prisma com o novo campo
-            // if (paymentRecord.mp_order_id) {
-            //     try {
-            //         const orderData = await orderClient.get({ id: paymentRecord.mp_order_id });
-            //         mpPaymentData = orderData.transactions?.payments?.[0];
-            //         if (mpPaymentData) {
-            //             mpPaymentData.mp_order_id = paymentRecord.mp_order_id;
-            //         }
-            //     } catch (err: any) {
-            //         console.warn(`[syncPaymentStatus] Order não encontrada no MP pelo mp_order_id: ${paymentRecord.mp_order_id}`);
-            //     }
-            // }
-
-            // Tenta buscar pelo mp_payment_id (API antiga e nova)
             if (!mpPaymentData && paymentRecord.mp_payment_id) {
                 try {
                     mpPaymentData = await mpPayment.get({ id: paymentRecord.mp_payment_id });
@@ -635,10 +763,7 @@ export class PaymentService {
             if (!mpPaymentData && paymentRecord.mp_preference_id) {
                 try {
                     const searchResponse = await mpPayment.search({
-                        options: {
-                            criteria: 'desc',
-                            limit: 50
-                        }
+                        options: { criteria: 'desc', limit: 50 }
                     });
 
                     const results = searchResponse.results?.filter((p: any) =>
@@ -659,10 +784,7 @@ export class PaymentService {
             if (!mpPaymentData) {
                 try {
                     const searchResponse = await mpPayment.search({
-                        options: {
-                            criteria: 'desc',
-                            external_reference: paymentRecord.saleId
-                        }
+                        options: { criteria: 'desc', external_reference: paymentRecord.saleId }
                     });
 
                     const results = searchResponse.results || [];
@@ -686,30 +808,9 @@ export class PaymentService {
             const newStatus = this.mapMercadoPagoStatus(mpPaymentData.status);
             console.info(`[syncPaymentStatus] Sincronizando pagamento ${paymentRecord.id}: ${paymentRecord.status} -> ${newStatus}`);
 
-            // Usa transação para garantir atomicidade entre atualização do pagamento e da venda
             const updatedPayment = await this.prisma.$transaction(async (tx) => {
-                const payment = await tx.payment.update({
-                    where: { id: paymentRecord.id },
-                    data: {
-                        status: newStatus,
-                        mp_payment_id: String(mpPaymentData.id),
-                        updatedAt: new Date()
-                    }
-                });
-
-                // Se o pagamento foi completado, atualiza a venda
-                if (newStatus === 'completed') {
-                    console.info(`[syncPaymentStatus] Pagamento completado! Atualizando venda ${paymentRecord.saleId}`);
-                    await tx.saleData.update({
-                        where: { id: paymentRecord.saleId },
-                        data: {
-                            status: 'Pagamento confirmado!',
-                            paymentCompleted: true
-                        }
-                    });
-                }
-
-                return payment;
+                await this.applyPaymentCompletion(tx, paymentRecord, newStatus, String(mpPaymentData.id));
+                return tx.payment.findUnique({ where: { id: paymentRecord.id } });
             });
 
             console.info(`[syncPaymentStatus] Pagamento ${paymentRecord.id} sincronizado com sucesso`);
@@ -718,9 +819,10 @@ export class PaymentService {
                 success: true,
                 updated: true,
                 payment: {
-                    id: updatedPayment.id,
-                    status: updatedPayment.status,
-                    mp_payment_id: updatedPayment.mp_payment_id,
+                    id: updatedPayment?.id,
+                    status: updatedPayment?.status,
+                    phase: updatedPayment?.phase,
+                    mp_payment_id: updatedPayment?.mp_payment_id,
                     mp_status: mpPaymentData.status,
                     mp_status_detail: mpPaymentData.status_detail
                 },
@@ -733,24 +835,62 @@ export class PaymentService {
                     date_created: mpPaymentData.date_created
                 }
             };
-
         } catch (error: any) {
             const message = error instanceof Error ? error.message : String(error);
             console.error("Erro ao sincronizar status:", message);
-            return {
-                success: false,
-                error: message
-            };
+            return { success: false, error: message };
         }
+    }
+
+    /**
+     * Verifica todos os pagamentos pendentes via Orders API e confirma os que foram pagos.
+     * Chamado periodicamente pelo scheduler para tratar boletos (compensação não imediata).
+     */
+    async syncPendingOrderPayments(): Promise<{ checked: number; confirmed: number; errors: number }> {
+        const pending = await this.prisma.payment.findMany({
+            where: {
+                status: 'pending',
+                mp_order_id: { not: null },
+            },
+        });
+
+        let confirmed = 0;
+        let errors = 0;
+
+        for (const paymentRecord of pending) {
+            try {
+                const orderData = await orderClient.get({ id: paymentRecord.mp_order_id! });
+                const paymentData = orderData.transactions?.payments?.[0];
+                if (!paymentData?.status) continue;
+
+                const newStatus = this.mapMercadoPagoStatus(paymentData.status as string);
+                if (newStatus !== 'completed') continue;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.payment.update({
+                        where: { id: paymentRecord.id },
+                        data: { mp_payment_id: paymentData.id },
+                    });
+                    await this.applyPaymentCompletion(tx, paymentRecord, newStatus, String(paymentData.id));
+                });
+
+                console.info(`[syncPendingOrderPayments] Pagamento ${paymentRecord.id} confirmado (order: ${paymentRecord.mp_order_id})`);
+                confirmed++;
+            } catch (err: any) {
+                console.warn(`[syncPendingOrderPayments] Erro ao verificar pagamento ${paymentRecord.id}: ${err.message}`);
+                errors++;
+            }
+        }
+
+        console.info(`[syncPendingOrderPayments] Verificados: ${pending.length} | Confirmados: ${confirmed} | Erros: ${errors}`);
+        return { checked: pending.length, confirmed, errors };
     }
 
     async debugPayment(paymentId: string) {
         try {
             const paymentRecord = await this.prisma.payment.findUnique({
                 where: { id: paymentId },
-                include: {
-                    sale: true
-                }
+                include: { sale: true }
             });
 
             if (!paymentRecord) {
@@ -769,10 +909,7 @@ export class PaymentService {
             if (!mpData) {
                 try {
                     const searchResponse = await mpPayment.search({
-                        options: {
-                            criteria: 'desc',
-                            external_reference: paymentRecord.saleId
-                        }
+                        options: { criteria: 'desc', external_reference: paymentRecord.saleId }
                     });
                     mpData = searchResponse.results?.[0] || null;
                 } catch (err: any) {
@@ -780,22 +917,13 @@ export class PaymentService {
                 }
             }
 
-            return {
-                paymentRecord,
-                mpData,
-                canSync: !!mpData
-            };
-
+            return { paymentRecord, mpData, canSync: !!mpData };
         } catch (error: any) {
             console.error("Erro no debug:", error);
             return { error: error.message };
         }
     }
 
-    /**
-     * Cancela um pagamento PIX pendente ou em processamento
-     * Segundo a documentação, só pode cancelar pagamentos com status=action_required
-     */
     async cancelPixPayment(paymentId: string) {
         try {
             const paymentRecord = await this.prisma.payment.findUnique({
@@ -806,12 +934,6 @@ export class PaymentService {
                 return { error: "Payment não encontrado no banco", success: false };
             }
 
-            // Comentado temporariamente até gerar o cliente Prisma com o novo campo
-            // if (!paymentRecord.mp_order_id) {
-            //     return { error: "Payment não possui mp_order_id (não é um pagamento PIX)", success: false };
-            // }
-
-            // Verifica se o pagamento está em status que permite cancelamento
             if (paymentRecord.status !== 'pending') {
                 return {
                     error: `Pagamento não pode ser cancelado. Status atual: ${paymentRecord.status}`,
@@ -821,38 +943,17 @@ export class PaymentService {
 
             console.info(`[cancelPixPayment] Cancelando pagamento PIX ${paymentId}`);
 
-            // Cancela a order via API do Mercado Pago
-            // Comentado temporariamente até gerar o cliente Prisma
-            // try {
-            //     await orderClient.cancel({ id: paymentRecord.mp_order_id });
-            // } catch (error: any) {
-            //     console.error(`[cancelPixPayment] Erro ao cancelar order no MP:`, error.message);
-            //     return { error: 'Erro ao cancelar order no Mercado Pago', message: error.message, success: false };
-            // }
-
-            // Atualiza o status no banco de dados
             const updatedPayment = await this.prisma.payment.update({
                 where: { id: paymentId },
-                data: {
-                    status: 'cancelled',
-                    updatedAt: new Date()
-                }
+                data: { status: 'cancelled', updatedAt: new Date() }
             });
 
             console.info(`[cancelPixPayment] Pagamento ${paymentId} cancelado com sucesso`);
 
-            return {
-                success: true,
-                paymentId: updatedPayment.id,
-                status: updatedPayment.status
-            };
-
+            return { success: true, paymentId: updatedPayment.id, status: updatedPayment.status };
         } catch (error: any) {
             console.error('[cancelPixPayment] Erro ao cancelar pagamento:', error.message);
-            return {
-                success: false,
-                error: error.message
-            };
+            return { success: false, error: error.message };
         }
     }
 
@@ -871,7 +972,7 @@ export class PaymentService {
                     events: [
                         { topic: 'payment' },
                         { topic: 'merchant_order' },
-                        { topic: 'order' }  // Adiciona suporte para webhooks de Orders
+                        { topic: 'order' }
                     ]
                 })
             });

@@ -7,7 +7,7 @@ const controller = new PaymentController();
 
 /**
  * @swagger
- * /payment-methods/webhook:
+ * /payment/webhook:
  *   post:
  *     summary: Endpoint para processar webhooks do Mercado Pago
  *     description: Recebe notificações do Mercado Pago sobre mudanças no status dos pagamentos (Payment API e Orders API)
@@ -66,9 +66,11 @@ router.post('/webhook', controller.processWebhook as RequestHandler);
 
 router.use(protectRoute);
 
+// ─── Rotas sem parâmetro dinâmico (devem vir ANTES de /:id) ──────────────────
+
 /**
  * @swagger
- * /payment-methods/preference:
+ * /payment/preference:
  *   post:
  *     summary: Cria uma preferência de pagamento Mercado Pago (Checkout Pro)
  *     description: Cria uma preferência de pagamento no Mercado Pago e registra o pagamento vinculado a uma venda
@@ -118,6 +120,11 @@ router.use(protectRoute);
  *                 type: number
  *                 description: Valor total do pagamento
  *                 example: 501.00
+ *               phase:
+ *                 type: string
+ *                 enum: [down_payment, final_payment, full]
+ *                 description: "Fase do pagamento — down_payment: entrada 30% (recalculada server-side), final_payment: segunda parcela, full: pagamento único"
+ *                 default: full
  *     responses:
  *       201:
  *         description: Preferência criada com sucesso
@@ -163,10 +170,140 @@ router.use(protectRoute);
  *                   example: "At least one policy returned UNAUTHORIZED."
  */
 router.post('/preference', controller.createPreference as RequestHandler);
+router.get('/methods', controller.getPaymentMethods as RequestHandler);
+router.post('/pix', controller.createPixPayment as RequestHandler);
+/**
+ * @swagger
+ * /payment/boleto:
+ *   post:
+ *     summary: Cria um boleto bancário usando Orders API (Checkout Transparente)
+ *     description: >
+ *       Cria um boleto bancário vinculado a uma venda. Use `phase` para indicar se é a entrada (30%)
+ *       ou a segunda parcela (70%). Para a segunda parcela, prefira `POST /payment/final-boleto`
+ *       que valida automaticamente se a entrada já foi confirmada.
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [saleId, paymentMethodId, amount]
+ *             properties:
+ *               saleId:
+ *                 type: string
+ *                 description: ID da venda
+ *               paymentMethodId:
+ *                 type: string
+ *                 description: ID do método de pagamento (boleto)
+ *               amount:
+ *                 type: number
+ *                 description: Valor do boleto em reais
+ *                 example: 150.00
+ *               expirationDays:
+ *                 type: number
+ *                 description: Dias para vencimento (padrão 3)
+ *                 example: 3
+ *               phase:
+ *                 type: string
+ *                 enum: [down_payment, final_payment, full]
+ *                 description: "Fase do pagamento — down_payment: entrada 30%, final_payment: segunda parcela 70%, full: pagamento único"
+ *                 default: full
+ *     responses:
+ *       201:
+ *         description: Boleto criado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 paymentId:
+ *                   type: string
+ *                   description: ID do pagamento no banco local
+ *                 orderId:
+ *                   type: string
+ *                   description: ID da Order no Mercado Pago
+ *                 orderStatus:
+ *                   type: string
+ *                   example: pending
+ *                 payment:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                       example: pending
+ *                     barcode:
+ *                       type: string
+ *                       description: Código de barras do boleto
+ *                     boleto_url:
+ *                       type: string
+ *                       description: URL para visualizar/imprimir o boleto
+ *                     expiration_date:
+ *                       type: string
+ *                       format: date-time
+ *       400:
+ *         description: Dados obrigatórios ausentes ou valor inválido
+ *       500:
+ *         description: Erro ao criar boleto
+ */
+router.post('/boleto', controller.createBoletoPayment as RequestHandler);
+router.post('/final-boleto', controller.createFinalBoleto as RequestHandler);
+router.post('/configure-webhook', controller.configureWebhook as RequestHandler);
 
 /**
  * @swagger
- * /payment-methods/payments/{id}:
+ * /payment/sync-pending:
+ *   post:
+ *     summary: Sincroniza todos os pagamentos pendentes via Orders API
+ *     description: >
+ *       Consulta o status de todos os pagamentos com `status=pending` e `mp_order_id` preenchido
+ *       diretamente na Mercado Pago Orders API. Confirma automaticamente os que já foram pagos.
+ *       Esse endpoint é chamado a cada 5 minutos pelo poller interno do servidor, mas pode ser
+ *       acionado manualmente para forçar sincronização imediata (útil após pagamento de boleto).
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Sincronização concluída
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 checked:
+ *                   type: integer
+ *                   description: Total de pagamentos pendentes verificados
+ *                   example: 3
+ *                 confirmed:
+ *                   type: integer
+ *                   description: Pagamentos confirmados neste ciclo
+ *                   example: 1
+ *                 errors:
+ *                   type: integer
+ *                   description: Erros ao consultar a API do Mercado Pago
+ *                   example: 0
+ *       500:
+ *         description: Erro ao executar sincronização
+ */
+router.post('/sync-pending', controller.syncPendingOrderPayments as RequestHandler);
+
+// Calcula o valor da segunda parcela — duas formas de URL para compatibilidade com o frontend
+router.get('/sales/:saleId/final-amount', controller.getFinalInstallmentAmount as RequestHandler);
+router.get('/final-amount/:saleId', controller.getFinalInstallmentAmount as RequestHandler);
+
+// ─── Rotas com parâmetro dinâmico (:id) — SEMPRE no final ────────────────────
+
+/**
+ * @swagger
+ * /payment/{id}:
  *   get:
  *     summary: Busca um pagamento específico por ID
  *     tags: [PaymentMethods]
@@ -221,10 +358,14 @@ router.post('/preference', controller.createPreference as RequestHandler);
  *                   type: string
  */
 router.get('/:id', controller.getById as RequestHandler);
+router.post('/:id/sync', controller.syncPaymentStatus as RequestHandler);
+router.get('/:id/debug', controller.debugPayment as RequestHandler);
+router.patch('/:id', controller.updatePayment as RequestHandler);
+router.post('/:id/cancel', controller.cancelPixPayment as RequestHandler);
 
 /**
  * @swagger
- * /payment-methods/payments/{id}/sync:
+ * /payment/{id}/sync:
  *   post:
  *     summary: Sincroniza o status de um pagamento com o Mercado Pago
  *     description: Busca o status atual do pagamento no Mercado Pago e atualiza no banco de dados. Útil quando o webhook não chega ou para verificação manual.
@@ -301,11 +442,9 @@ router.get('/:id', controller.getById as RequestHandler);
  *       500:
  *         description: Erro ao sincronizar status
  */
-router.post('/:id/sync', controller.syncPaymentStatus as RequestHandler);
-
 /**
  * @swagger
- * /payment-methods/payments/{id}/debug:
+ * /payment/{id}/debug:
  *   get:
  *     summary: Debug de um pagamento - informações detalhadas
  *     description: Retorna informações completas do pagamento tanto no banco quanto no Mercado Pago para debug
@@ -342,11 +481,9 @@ router.post('/:id/sync', controller.syncPaymentStatus as RequestHandler);
  *       500:
  *         description: Erro ao buscar informações de debug
  */
-router.get('/:id/debug', controller.debugPayment as RequestHandler);
-
 /**
  * @swagger
- * /payment-methods/payments/{id}:
+ * /payment/{id}:
  *   patch:
  *     summary: Atualiza informações de um pagamento
  *     description: Atualiza dados como status, mp_payment_id, etc.
@@ -408,11 +545,9 @@ router.get('/:id/debug', controller.debugPayment as RequestHandler);
  *                 message:
  *                   type: string
  */
-router.patch('/:id', controller.updatePayment as RequestHandler);
-
 /**
  * @swagger
- * /payment-methods/methods:
+ * /payment/methods:
  *   get:
  *     summary: Lista todos os meios de pagamento disponíveis
  *     description: Retorna todos os métodos de pagamento aceitos pelo Mercado Pago
@@ -444,11 +579,9 @@ router.patch('/:id', controller.updatePayment as RequestHandler);
  *       500:
  *         description: Erro ao buscar meios de pagamento
  */
-router.get('/methods', controller.getPaymentMethods as RequestHandler);
-
 /**
  * @swagger
- * /payment-methods/pix:
+ * /payment/pix:
  *   post:
  *     summary: Cria um pagamento PIX usando Orders API (Checkout Transparente)
  *     description: Cria um pagamento PIX instantâneo retornando QR Code e Pix Copia e Cola
@@ -489,6 +622,11 @@ router.get('/methods', controller.getPaymentMethods as RequestHandler);
  *                 description: Tempo de expiração em minutos (30 a 43200 - 30 dias)
  *                 example: 60
  *                 default: 30
+ *               phase:
+ *                 type: string
+ *                 enum: [down_payment, final_payment, full]
+ *                 description: "Fase do pagamento — down_payment: entrada 30%, final_payment: segunda parcela, full: pagamento único"
+ *                 default: full
  *     responses:
  *       201:
  *         description: Pagamento PIX criado com sucesso
@@ -537,12 +675,102 @@ router.get('/methods', controller.getPaymentMethods as RequestHandler);
  *       500:
  *         description: Erro ao criar pagamento PIX
  */
-router.post('/pix', controller.createPixPayment as RequestHandler);
-router.post('/boleto', controller.createBoletoPayment as RequestHandler);
-
 /**
  * @swagger
- * /payment-methods/payments/{id}/cancel:
+ * /payment/final-boleto:
+ *   post:
+ *     summary: Cria o boleto da segunda parcela (70%) — sempre boleto por regra de negócio
+ *     description: >
+ *       Requer que a entrada de 30% já esteja confirmada (downPaymentCompleted=true).
+ *       O `amount` pode ser informado explicitamente para ajustar pelo peso real da carga.
+ *       Se omitido, calcula automaticamente como (total do contrato - entrada paga).
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [saleId, paymentMethodId]
+ *             properties:
+ *               saleId:
+ *                 type: string
+ *               paymentMethodId:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *                 description: Valor ajustado da parcela final (opcional — usa cálculo automático se omitido)
+ *               expirationDays:
+ *                 type: number
+ *                 description: Dias para vencimento do boleto (padrão 3)
+ *     responses:
+ *       201: { description: Boleto final criado com sucesso }
+ *       409: { description: Entrada ainda não confirmada ou boleto já existe }
+ */
+/**
+ * @swagger
+ * /payment/sales/{saleId}/final-amount:
+ *   get:
+ *     summary: Calcula o valor da segunda parcela (70%) para uma venda
+ *     description: >
+ *       Retorna contractTotal, totalDownPaid e finalAmount considerando o peso real
+ *       quando registrado (adjustedContractTotal). Disponível também como
+ *       `GET /payment/final-amount/{saleId}` (alias de compatibilidade).
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: saleId
+ *         required: true
+ *         schema: { type: string }
+ *         description: ID da venda
+ *     responses:
+ *       200:
+ *         description: Valores calculados com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 contractTotal:
+ *                   type: number
+ *                   description: Valor total do contrato (ajustado pelo peso se disponível)
+ *                 totalDownPaid:
+ *                   type: number
+ *                   description: Total já pago na entrada
+ *                 finalAmount:
+ *                   type: number
+ *                   description: Valor restante a pagar (contractTotal - totalDownPaid)
+ *                 weightAdjusted:
+ *                   type: boolean
+ *                   description: Indica se o valor foi recalculado com base no peso real
+ *       409: { description: Entrada ainda não confirmada }
+ *       404: { description: Venda não encontrada }
+ */
+/**
+ * @swagger
+ * /payment/final-amount/{saleId}:
+ *   get:
+ *     summary: "[Alias] Calcula o valor da segunda parcela (70%)"
+ *     description: Alias de `/payment/sales/{saleId}/final-amount` para compatibilidade com o frontend.
+ *     tags: [PaymentMethods]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: saleId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Valores calculados }
+ *       409: { description: Entrada ainda não confirmada }
+ */
+/**
+ * @swagger
+ * /payment/{id}/cancel:
  *   post:
  *     summary: Cancela um pagamento PIX pendente
  *     description: Cancela um pagamento PIX que ainda não foi pago (status pending)
@@ -590,11 +818,9 @@ router.post('/boleto', controller.createBoletoPayment as RequestHandler);
  *       500:
  *         description: Erro ao cancelar pagamento
  */
-router.post('/:id/cancel', controller.cancelPixPayment as RequestHandler);
-
 /**
  * @swagger
- * /payment-methods/configure-webhook:
+ * /payment/configure-webhook:
  *   post:
  *     summary: Configura webhook do Mercado Pago
  *     description: Registra a URL de webhook no Mercado Pago para receber notificações de pagamentos
@@ -626,6 +852,4 @@ router.post('/:id/cancel', controller.cancelPixPayment as RequestHandler);
  *       500:
  *         description: Erro ao configurar webhook
  */
-router.post('/configure-webhook', controller.configureWebhook as RequestHandler);
-
 export default router;

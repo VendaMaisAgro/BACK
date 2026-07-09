@@ -1,8 +1,10 @@
 import { Request, Response, RequestHandler } from "express";
 import { SaleService } from "./sales.service";
 import { CreateSaleDataDto, SellerDecisionDto, UpdateSaleDataDto } from "./dto/create-sales.dto";
+import { UploadS3Service } from "../upload-S3/uploadS3.service";
 
 const service = new SaleService();
+const s3Service = new UploadS3Service();
 
 export class SaleController {
   public create: RequestHandler = async (req: Request, res: Response): Promise<void> => {
@@ -228,6 +230,180 @@ export class SaleController {
         return;
       }
       res.status(500).json({ error: "Erro ao registrar documento." });
+    }
+  };
+
+  /** PATCH /sales/:id/authorize-harvest — autoriza colheita após confirmação da entrada */
+  public authorizeHarvest: RequestHandler = async (req, res) => {
+    try {
+      const saleId = req.params.id;
+      const result = await service.authorizeHarvest(saleId);
+      res.status(200).json(result);
+    } catch (error: any) {
+      if (error.message === 'HARVEST_BLOCKED_NO_DOWN_PAYMENT') {
+        res.status(409).json({
+          error: 'A colheita só pode ser autorizada após a confirmação do pagamento da entrada (30%).',
+          code: 'HARVEST_BLOCKED_NO_DOWN_PAYMENT',
+        });
+        return;
+      }
+      if (error.message === 'HARVEST_BLOCKED_SELLER_NOT_APPROVED') {
+        res.status(409).json({
+          error: 'A colheita só pode ser autorizada após o vendedor aprovar o pedido.',
+          code: 'HARVEST_BLOCKED_SELLER_NOT_APPROVED',
+        });
+        return;
+      }
+      if (error.message?.includes('não encontrada')) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao autorizar colheita.' });
+    }
+  };
+
+  /** PATCH /sales/:id/payment-method — altera o método de pagamento da primeira parcela */
+  public changePaymentMethod: RequestHandler = async (req, res) => {
+    try {
+      const saleId = req.params.id;
+      const { paymentMethodId } = req.body;
+
+      if (!paymentMethodId) {
+        res.status(400).json({ error: 'paymentMethodId é obrigatório.' });
+        return;
+      }
+
+      const result = await service.changePaymentMethod(saleId, paymentMethodId);
+      res.status(200).json(result);
+    } catch (error: any) {
+      if (error.message === 'PAYMENT_ALREADY_COMPLETED') {
+        res.status(409).json({
+          error: 'Não é possível alterar o método de pagamento: o pagamento final já foi concluído.',
+          code: 'PAYMENT_ALREADY_COMPLETED',
+        });
+        return;
+      }
+      if (error.message === 'DOWN_PAYMENT_ALREADY_COMPLETED') {
+        res.status(409).json({
+          error: 'Não é possível alterar o método de pagamento: a entrada já foi confirmada.',
+          code: 'DOWN_PAYMENT_ALREADY_COMPLETED',
+        });
+        return;
+      }
+      if (error.message?.includes('não encontrad')) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao alterar método de pagamento.' });
+    }
+  };
+
+  /**
+   * POST /sales/:id/weight — registra peso manual com upload do ticket de balança para o S3.
+   * Espera multipart/form-data com campo 'file' (imagem/pdf) e 'weightKg' (número).
+   */
+  public registerWeight: RequestHandler = async (req, res) => {
+    try {
+      const saleId = req.params.id;
+      const uploadedById = req.user?.userId as string | undefined;
+      if (!uploadedById) {
+        res.status(401).json({ error: 'Token inválido ou ausente.' });
+        return;
+      }
+
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ error: 'Arquivo do ticket de balança é obrigatório.' });
+        return;
+      }
+
+      const weightKg = parseFloat(req.body.weightKg);
+      if (isNaN(weightKg) || weightKg <= 0) {
+        res.status(400).json({ error: 'weightKg deve ser um número maior que zero.' });
+        return;
+      }
+
+      const uploaded = await s3Service.upload(file);
+
+      const result = await service.registerManualWeight({
+        saleId,
+        uploadedById,
+        weightKg,
+        fileUrl: uploaded.publicUrl,
+      });
+
+      res.status(201).json({
+        weightKg,
+        fileUrl: uploaded.publicUrl,
+        document: result.document,
+        sale: result.sale,
+      });
+    } catch (error: any) {
+      if (error.message === 'WEIGHT_ALREADY_REGISTERED') {
+        res.status(409).json({
+          error: 'O peso desta venda já foi registrado. Para corrigir, entre em contato com o suporte.',
+          code: 'WEIGHT_ALREADY_REGISTERED',
+        });
+        return;
+      }
+      if (error.message === 'WEIGHT_BLOCKED_NO_DOWN_PAYMENT') {
+        res.status(409).json({
+          error: 'O peso só pode ser registrado após a confirmação do pagamento da entrada (30%).',
+          code: 'WEIGHT_BLOCKED_NO_DOWN_PAYMENT',
+        });
+        return;
+      }
+      if (error.message === 'WEIGHT_BLOCKED_SELLER_NOT_APPROVED') {
+        res.status(409).json({
+          error: 'O peso só pode ser registrado após o vendedor aprovar o pedido.',
+          code: 'WEIGHT_BLOCKED_SELLER_NOT_APPROVED',
+        });
+        return;
+      }
+      if (error.message?.includes('não encontrada')) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao registrar peso.' });
+    }
+  };
+
+  /** PATCH /sales/:id/apply-penalty — aplica multa por inadimplência e cancela a venda */
+  public applyPenalty: RequestHandler = async (req, res) => {
+    try {
+      const saleId = req.params.id;
+      const { penaltyAmount, reason } = req.body;
+
+      if (!reason || typeof reason !== 'string' || !reason.trim()) {
+        res.status(400).json({ error: 'O campo reason (motivo da multa) é obrigatório.' });
+        return;
+      }
+
+      if (penaltyAmount !== undefined && (typeof penaltyAmount !== 'number' || penaltyAmount < 0)) {
+        res.status(400).json({ error: 'penaltyAmount deve ser um número maior ou igual a zero.' });
+        return;
+      }
+
+      const result = await service.applyPenalty(saleId, { penaltyAmount, reason });
+      res.status(200).json(result);
+    } catch (error: any) {
+      if (error.message === 'PENALTY_ALREADY_APPLIED') {
+        res.status(409).json({ error: 'Multa já aplicada a esta venda.', code: 'PENALTY_ALREADY_APPLIED' });
+        return;
+      }
+      if (error.message?.startsWith('PENALTY_BLOCKED:')) {
+        res.status(409).json({ error: error.message.split(':')[1], code: 'PENALTY_BLOCKED' });
+        return;
+      }
+      if (error.message?.includes('não encontrada')) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao aplicar multa.' });
     }
   };
 
