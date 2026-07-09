@@ -125,10 +125,12 @@ router.use(protectRoute as RequestHandler);
  *         status:
  *           type: string
  *           description: >
- *             Status atual da venda. Valores possíveis: "Pedido realizado!", "Pedido aprovado!",
- *             "Pedido recusado!", "Colheita autorizada", "Entrada confirmada",
- *             "Aguardando pagamento final", "Em processamento", "Disponível para entrega",
- *             "Concluído", "Cancelado"
+ *             Status atual da venda. Sequência do fluxo: "Pedido realizado!" →
+ *             "Aprovado pelo vendedor" | "Recusado pelo vendedor" → "Entrada confirmada" →
+ *             "Colheita autorizada" → "Aguardando pagamento final" → "Concluído".
+ *             Outros valores: "Em processamento", "Disponível para entrega", "Entregue", "Cancelado".
+ *             O status "Concluído" é atribuído tanto pela confirmação do pagamento final (webhook/polling)
+ *             quanto pelo aceite tácito de entrega (Cláusula 5).
  *           example: "Pedido realizado!"
  *         boughtProducts:
  *           type: array

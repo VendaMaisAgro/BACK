@@ -58,7 +58,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 // Polling de boletos pendentes — roda a cada 5 minutos para compensar atrasos bancários
 const paymentService = new PaymentService();
 const BOLETO_POLL_INTERVAL_MS = 5 * 60 * 1000;
-setInterval(async () => {
+const boletoPoller = setInterval(async () => {
   try {
     const result = await paymentService.syncPendingOrderPayments();
     if (result.confirmed > 0) {
@@ -68,5 +68,6 @@ setInterval(async () => {
     console.error('[BoletoPoller] Erro no ciclo de polling:', err.message);
   }
 }, BOLETO_POLL_INTERVAL_MS);
+boletoPoller.unref(); // não impede o processo de finalizar em testes/CLI
 
 export default app;

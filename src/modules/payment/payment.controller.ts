@@ -358,6 +358,10 @@ export class PaymentController {
                 res.status(409).json({ error: error.message.split(':').slice(1).join(':'), code: 'FINAL_BOLETO_BLOCKED' });
                 return;
             }
+            if (error.message?.includes('não encontrada')) {
+                res.status(404).json({ error: error.message });
+                return;
+            }
             console.error('Erro ao criar boleto final:', error);
             res.status(500).json({ error: 'Erro ao criar boleto final.', message: error.message });
         }

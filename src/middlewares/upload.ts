@@ -14,4 +14,7 @@ const diskStorage = multer.diskStorage({
 export const upload = multer({ storage: diskStorage });
 
 // Memory storage — necessário para uploads diretos ao S3 (file.buffer disponível)
-export const uploadMemory = multer({ storage: multer.memoryStorage() });
+export const uploadMemory = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB — evita consumo excessivo de RAM
+});

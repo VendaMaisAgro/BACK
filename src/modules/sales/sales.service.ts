@@ -130,7 +130,7 @@ export class SaleService {
     return {
       firstInstallmentPaid:
         sale.downPaymentCompleted ||
-        payments.some(p => p.phase === 'down_payment' && p.status === 'completed'),
+        payments.some(p => (p.phase === 'down_payment' || p.phase === 'full') && p.status === 'completed'),
       finalPaymentPaid:
         sale.paymentCompleted ||
         payments.some(p => (p.phase === 'final_payment' || p.phase === 'full') && p.status === 'completed'),
@@ -605,7 +605,7 @@ export class SaleService {
       where: { id: saleId },
       data: {
         actualDeliveryDate: tacitDeadline,
-        status: 'Concluída',
+        status: 'Concluído',
       },
     });
 
@@ -725,7 +725,7 @@ export class SaleService {
         include: { boughtProducts: true },
       });
 
-      // Atualiza BoughtProduct.value com os valores recalculados pelo peso real
+      // Atualiza BoughtProduct.value usando a mesma fórmula de calculateWeightBasedTotal (peso × preço/unidade)
       if (adjustedProductsTotal !== null && boughtProducts.length > 0) {
         if (boughtProducts.length === 1) {
           await tx.boughtProduct.update({
@@ -736,7 +736,11 @@ export class SaleService {
           const originalTotal = boughtProducts.reduce((sum, bp) => sum + bp.value, 0);
           if (originalTotal > 0) {
             for (const bp of boughtProducts) {
-              const newValue = parseFloat((adjustedProductsTotal * (bp.value / originalTotal)).toFixed(2));
+              const kgPerUnit = this.getKgPerUnit(bp.sellingUnitProduct.unit.unit);
+              if (kgPerUnit === null) continue;
+              const proportion = bp.value / originalTotal;
+              const productWeightKg = params.weightKg * proportion;
+              const newValue = parseFloat(((productWeightKg / kgPerUnit) * bp.sellingUnitProduct.minPrice).toFixed(2));
               await tx.boughtProduct.update({
                 where: { id: bp.id },
                 data: { value: newValue },
@@ -837,7 +841,7 @@ export class SaleService {
       where: {
         actualDeliveryDate: null,
         plannedDeliveryDate: { lt: now },
-        status: { notIn: ['Concluída', 'Recusado pelo vendedor', 'Cancelado'] },
+        status: { notIn: ['Concluído', 'Concluída', 'Recusado pelo vendedor', 'Cancelado'] },
       },
       select: { id: true, plannedDeliveryDate: true },
     });

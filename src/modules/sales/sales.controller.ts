@@ -291,7 +291,7 @@ export class SaleController {
         });
         return;
       }
-      if (error.message?.includes('não encontrado')) {
+      if (error.message?.includes('não encontrad')) {
         res.status(404).json({ error: error.message });
         return;
       }
@@ -345,6 +345,13 @@ export class SaleController {
         res.status(409).json({
           error: 'O peso desta venda já foi registrado. Para corrigir, entre em contato com o suporte.',
           code: 'WEIGHT_ALREADY_REGISTERED',
+        });
+        return;
+      }
+      if (error.message === 'WEIGHT_BLOCKED_NO_DOWN_PAYMENT') {
+        res.status(409).json({
+          error: 'O peso só pode ser registrado após a confirmação do pagamento da entrada (30%).',
+          code: 'WEIGHT_BLOCKED_NO_DOWN_PAYMENT',
         });
         return;
       }

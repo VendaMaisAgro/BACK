@@ -48,7 +48,7 @@ export class PaymentService {
                             id: params.saleId,
                             title: params.title,
                             quantity: 1,
-                            unit_price
+                            unit_price: amount // quantity é sempre 1; usar amount garante que MP cobra o mesmo valor armazenado no banco
                         }
                     ],
                     back_urls: {
@@ -378,8 +378,8 @@ export class PaymentService {
 
         // Usa o total ajustado pela pesagem se disponível; caso contrário usa o total original do contrato
         const originalTotal = sale.boughtProducts.reduce((sum, bp) => sum + bp.value, 0) + Number(sale.transportValue);
-        const adjustedContractTotal = (sale as any).adjustedContractTotal
-            ? Number((sale as any).adjustedContractTotal)
+        const adjustedContractTotal = sale.adjustedContractTotal !== null
+            ? Number(sale.adjustedContractTotal)
             : null;
         const contractTotal = adjustedContractTotal ?? originalTotal;
 
@@ -433,8 +433,8 @@ export class PaymentService {
         if (amount === undefined) {
             // Prefere o total ajustado pela pesagem; caso contrário usa o total original
             const originalTotal = sale.boughtProducts.reduce((sum, bp) => sum + bp.value, 0) + Number(sale.transportValue);
-            const adjustedContractTotal = (sale as any).adjustedContractTotal
-                ? Number((sale as any).adjustedContractTotal)
+            const adjustedContractTotal = sale.adjustedContractTotal !== null
+                ? Number(sale.adjustedContractTotal)
                 : null;
             const contractTotal = adjustedContractTotal ?? originalTotal;
             const totalDownPaid = sale.Payment
@@ -516,19 +516,21 @@ export class PaymentService {
                 console.info(`[applyPaymentCompletion] Entrada confirmada para venda ${paymentRecord.saleId}`);
                 await tx.saleData.update({
                     where: { id: paymentRecord.saleId },
-                    data: {
-                        downPaymentCompleted: true,
-                        status: 'Entrada confirmada',
-                    },
+                    data: { downPaymentCompleted: true, status: 'Entrada confirmada' },
+                });
+            } else if (paymentRecord.phase === 'full') {
+                // Pagamento único: quita entrada e total ao mesmo tempo
+                console.info(`[applyPaymentCompletion] Pagamento único (full) confirmado para venda ${paymentRecord.saleId}`);
+                await tx.saleData.update({
+                    where: { id: paymentRecord.saleId },
+                    data: { downPaymentCompleted: true, paymentCompleted: true, status: 'Concluído' },
                 });
             } else {
+                // final_payment
                 console.info(`[applyPaymentCompletion] Pagamento final confirmado para venda ${paymentRecord.saleId}`);
                 await tx.saleData.update({
                     where: { id: paymentRecord.saleId },
-                    data: {
-                        paymentCompleted: true,
-                        status: 'Concluído',
-                    },
+                    data: { paymentCompleted: true, status: 'Concluído' },
                 });
             }
         }
