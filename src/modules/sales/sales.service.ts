@@ -725,6 +725,27 @@ export class SaleService {
         include: { boughtProducts: true },
       });
 
+      // Atualiza BoughtProduct.value com os valores recalculados pelo peso real
+      if (adjustedProductsTotal !== null && boughtProducts.length > 0) {
+        if (boughtProducts.length === 1) {
+          await tx.boughtProduct.update({
+            where: { id: boughtProducts[0].id },
+            data: { value: adjustedProductsTotal },
+          });
+        } else {
+          const originalTotal = boughtProducts.reduce((sum, bp) => sum + bp.value, 0);
+          if (originalTotal > 0) {
+            for (const bp of boughtProducts) {
+              const newValue = parseFloat((adjustedProductsTotal * (bp.value / originalTotal)).toFixed(2));
+              await tx.boughtProduct.update({
+                where: { id: bp.id },
+                data: { value: newValue },
+              });
+            }
+          }
+        }
+      }
+
       return {
         document: doc,
         sale: updatedSale,

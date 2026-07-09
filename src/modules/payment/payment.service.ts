@@ -1,6 +1,5 @@
 import { Payment, PrismaClient } from '@prisma/client';
 import { MercadoPagoConfig, Preference, Payment as MPPayment, PaymentMethod, Order } from 'mercadopago';
-import type { PaymentResponse } from 'mercadopago/dist/clients/payment/commonTypes';
 import { randomUUID } from 'crypto';
 import 'dotenv/config';
 
@@ -151,7 +150,6 @@ export class PaymentService {
                     total_amount: amount.toFixed(2),
                     external_reference: params.saleId,
                     processing_mode: 'automatic',
-                    notification_url: `${process.env.URL_BACKEND}/payment/webhook`,
                     transactions: {
                         payments: [
                             {
@@ -284,8 +282,7 @@ export class PaymentService {
                     total_amount: amount.toFixed(2),
                     external_reference: params.saleId,
                     processing_mode: 'automatic',
-                    notification_url: `${process.env.URL_BACKEND}/payment/webhook`,
-                    transactions: {
+                                    transactions: {
                         payments: [
                             {
                                 amount: amount.toFixed(2),
@@ -530,7 +527,7 @@ export class PaymentService {
                     where: { id: paymentRecord.saleId },
                     data: {
                         paymentCompleted: true,
-                        // Status mantido — vendedor avança manualmente para "Disponível para entrega"
+                        status: 'Concluído',
                     },
                 });
             }
@@ -657,7 +654,7 @@ export class PaymentService {
         }
     }
 
-    private async processOrderWebhook(orderId: string, webhookData: any) {
+    private async processOrderWebhook(orderId: string, _webhookData: any) {
         try {
             console.info(`[processOrderWebhook] Processando webhook para Order ${orderId}`);
 
