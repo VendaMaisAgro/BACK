@@ -76,9 +76,6 @@ router.use(protectRoute as RequestHandler);
  *           nullable: true
  *           description: "Decisão do vendedor: true=aceito, false=recusado, null=pendente"
  *           example: null
- *         status:
- *           type: string
- *           example: "Pedido realizado!"
  *         addressId:
  *           type: string
  *           format: uuid
@@ -90,7 +87,49 @@ router.use(protectRoute as RequestHandler);
  *           format: uuid
  *         paymentCompleted:
  *           type: boolean
+ *           description: true quando o pagamento final (70%) foi confirmado pelo Mercado Pago
  *           example: false
+ *         downPaymentCompleted:
+ *           type: boolean
+ *           description: true quando a entrada (30%) foi confirmada pelo Mercado Pago
+ *           example: false
+ *         firstInstallmentPaid:
+ *           type: boolean
+ *           description: "[Computed] true se a entrada foi paga (downPaymentCompleted ou payment com phase=down_payment e status=completed)"
+ *           readOnly: true
+ *           example: false
+ *         finalPaymentPaid:
+ *           type: boolean
+ *           description: "[Computed] true se o pagamento final foi pago (paymentCompleted ou payment com phase=final_payment/full e status=completed)"
+ *           readOnly: true
+ *           example: false
+ *         adjustedContractTotal:
+ *           type: number
+ *           nullable: true
+ *           description: Valor total ajustado após pesagem real (inclui frete). Null se peso não foi registrado.
+ *           example: 9234.50
+ *         penaltyApplied:
+ *           type: boolean
+ *           description: true se multa por inadimplência foi aplicada
+ *           example: false
+ *         penaltyAmount:
+ *           type: number
+ *           nullable: true
+ *           description: Valor da multa em reais
+ *           example: 150.00
+ *         penaltyReason:
+ *           type: string
+ *           nullable: true
+ *           description: Motivo da multa
+ *           example: "Atraso no pagamento da segunda parcela"
+ *         status:
+ *           type: string
+ *           description: >
+ *             Status atual da venda. Valores possíveis: "Pedido realizado!", "Pedido aprovado!",
+ *             "Pedido recusado!", "Colheita autorizada", "Entrada confirmada",
+ *             "Aguardando pagamento final", "Em processamento", "Disponível para entrega",
+ *             "Concluído", "Cancelado"
+ *           example: "Pedido realizado!"
  *         boughtProducts:
  *           type: array
  *           items:
