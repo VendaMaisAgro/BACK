@@ -1,17 +1,19 @@
 import { RequestHandler, Request, Response } from 'express';
+import { PrismaClient } from '@prisma/client';
 import { PaymentService } from './payment.service';
 import { SaleService } from '../sales/sales.service';
 
-const service = new PaymentService();
-const saleService = new SaleService();
+const prisma = new PrismaClient();
+const service = new PaymentService(prisma);
+const saleService = new SaleService(prisma);
 
 type PartyRole = 'admin' | 'buyer' | 'seller' | null;
 
 /** Retorna o papel do usuário autenticado em relação à venda (admin, comprador, vendedor ou nenhum). */
 async function getRoleForSale(req: Request, saleId: string): Promise<PartyRole> {
-    if (req.user?.role === 'admin') return 'admin';
     const parties = await saleService.getSaleParties(saleId);
     if (!parties) return null;
+    if (req.user?.role === 'admin') return 'admin';
     if (parties.buyerId === req.user?.userId) return 'buyer';
     if (req.user?.userId && parties.sellerIds.includes(req.user.userId)) return 'seller';
     return null;

@@ -1,6 +1,6 @@
-// Uso único para o bootstrap do primeiro admin (sem nenhum admin ainda existente
-// para chamar POST /user/admin). A partir do segundo admin em diante, use o
-// endpoint protegido POST /user/admin autenticado com um token de admin.
+// Uso único para o bootstrap do primeiro admin, quando ainda não existe nenhum
+// admin capaz de chamar POST /user/admin. A partir do segundo admin em diante,
+// use o endpoint protegido POST /user/admin autenticado com um token de admin.
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { isCPF, isCNPJ, formatToCPF, formatToCNPJ } from 'brazilian-values';

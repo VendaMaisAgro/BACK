@@ -98,7 +98,7 @@ router.post("/register", controller.createHandler);
  *     summary: Cria um novo usuário admin (somente admins podem criar outros admins)
  *     tags: [User]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:

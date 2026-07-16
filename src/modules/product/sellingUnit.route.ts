@@ -40,7 +40,7 @@ router.get('/', controller.getAllSellingUnits.bind(controller) as express.Reques
  *     summary: Cria uma nova unidade de medida (somente admin)
  *     tags: [SellingUnit]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -74,7 +74,7 @@ router.post(
  *     summary: Atualiza uma unidade de medida (somente admin)
  *     tags: [SellingUnit]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -108,7 +108,7 @@ router.put(
  *     summary: Remove uma unidade de medida (somente admin)
  *     tags: [SellingUnit]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
