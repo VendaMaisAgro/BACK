@@ -223,6 +223,57 @@ export class SellingUnitProductService {
     return prisma.sellingUnit.findMany({ orderBy: { title: 'asc' } });
   }
 
+  async createSellingUnit(data: { unit: string; title: string }) {
+    if (!data.unit || !data.title) {
+      throw new Error('unit e title são obrigatórios');
+    }
+
+    const existing = await prisma.sellingUnit.findFirst({ where: { unit: data.unit } });
+    if (existing) {
+      throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+    }
+
+    return prisma.sellingUnit.create({ data });
+  }
+
+  async updateSellingUnit(id: string, data: { unit?: string; title?: string }) {
+    const existing = await prisma.sellingUnit.findUnique({ where: { id } });
+    if (!existing) {
+      throw new Error(`Unidade de medida com ID ${id} não encontrada`);
+    }
+
+    if (data.unit && data.unit !== existing.unit) {
+      const duplicate = await prisma.sellingUnit.findFirst({ where: { unit: data.unit, id: { not: id } } });
+      if (duplicate) {
+        throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+      }
+    }
+
+    return prisma.sellingUnit.update({
+      where: { id },
+      data: {
+        ...(data.unit !== undefined && { unit: data.unit }),
+        ...(data.title !== undefined && { title: data.title }),
+      },
+    });
+  }
+
+  async deleteSellingUnit(id: string) {
+    const existing = await prisma.sellingUnit.findUnique({
+      where: { id },
+      include: { sellingUnitProduct: true },
+    });
+    if (!existing) {
+      throw new Error(`Unidade de medida com ID ${id} não encontrada`);
+    }
+
+    if (existing.sellingUnitProduct.length > 0) {
+      throw new Error('Não é possível deletar esta unidade de medida pois existem produtos que a utilizam');
+    }
+
+    return prisma.sellingUnit.delete({ where: { id } });
+  }
+
   async deleteByProductId(productId: string) {
     try {
       const product = await prisma.product.findUnique({

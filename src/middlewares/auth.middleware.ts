@@ -25,12 +25,20 @@ export const protectRoute = (req: Request, res: Response, next: NextFunction) =>
       return res.status(401).json({ error: 'Unauthorized - Invalid token payload' });
     }
 
-    req.user = { userId: decoded.id, email: decoded.email };
+    req.user = { userId: decoded.id, email: decoded.email, role: decoded.role };
 
     next();
   } catch (error) {
     return res.status(401).json({ error: 'Unauthorized - Invalid token' });
   }
+};
+
+export const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden - Admin access required' });
+  }
+
+  next();
 };
 
 declare global {
@@ -39,6 +47,7 @@ declare global {
       user?: {
         userId: string;
         email: string;
+        role?: string;
       };
     }
   }

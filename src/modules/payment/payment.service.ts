@@ -109,6 +109,14 @@ export class PaymentService {
         });
     }
 
+    async getSaleIdForPayment(paymentId: string): Promise<string | null> {
+        const payment = await this.prisma.payment.findUnique({
+            where: { id: paymentId },
+            select: { saleId: true },
+        });
+        return payment?.saleId ?? null;
+    }
+
     async getPaymentMethods() {
         try {
             console.info('[getPaymentMethods] Buscando meios de pagamento disponíveis');

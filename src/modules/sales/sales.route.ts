@@ -1,6 +1,6 @@
 import express from "express";
 import { SaleController } from "./sales.controller";
-import { protectRoute } from "../../middlewares/auth.middleware";
+import { protectRoute, requireAdmin } from "../../middlewares/auth.middleware";
 import { requireAddress } from "../../middlewares/requireAddress.middleware";
 import { uploadMemory } from "../../middlewares/upload";
 import { RequestHandler } from "express";
@@ -171,7 +171,7 @@ router.post("/", requireAddress as RequestHandler, controller.create as RequestH
  *       201:
  *         description: Venda criada com sucesso
  */
-router.get("/", controller.getAll as RequestHandler);
+router.get("/", requireAdmin as RequestHandler, controller.getAll as RequestHandler);
 
 /**
  * @swagger
@@ -370,7 +370,7 @@ router.post("/:id/tacit-acceptance", controller.tacitAcceptance as RequestHandle
  *     responses:
  *       200: { description: Resultado do processamento em lote }
  */
-router.post("/batch-tacit-acceptance", controller.batchTacitAcceptance as RequestHandler);
+router.post("/batch-tacit-acceptance", requireAdmin as RequestHandler, controller.batchTacitAcceptance as RequestHandler);
 
 /**
  * @swagger

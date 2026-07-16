@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { UserController } from "./user.controller";
 import multer from "multer";
+import { protectRoute, requireAdmin } from "../../middlewares/auth.middleware";
 
 const router = Router();
 const controller = new UserController();
@@ -92,6 +93,56 @@ router.post("/register", controller.createHandler);
 
 /**
  * @swagger
+ * /user/admin:
+ *   post:
+ *     summary: Cria um novo usuário admin (somente admins podem criar outros admins)
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name, email, phone_number, password]
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Admin Silva
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: admin@empresa.com
+ *               phone_number:
+ *                 type: string
+ *                 example: "11999999999"
+ *               password:
+ *                 type: string
+ *                 description: Mínimo 8 caracteres, com maiúscula, minúscula, número e caractere especial
+ *                 example: Senha@123
+ *               cpf:
+ *                 type: string
+ *                 description: Obrigatório se não informar cnpj (login é sempre por CPF/CNPJ)
+ *                 example: "52998224725"
+ *               cnpj:
+ *                 type: string
+ *                 description: Obrigatório se não informar cpf (login é sempre por CPF/CNPJ)
+ *                 example: "11222333000181"
+ *     responses:
+ *       201:
+ *         description: Usuário admin criado com sucesso
+ *       400:
+ *         description: Dados inválidos ou e-mail já cadastrado
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer perfil admin
+ */
+router.post("/admin", protectRoute, requireAdmin, controller.createAdminHandler);
+
+/**
+ * @swagger
  * /user:
  *   get:
  *     summary: Lista todos os usuários
@@ -100,7 +151,7 @@ router.post("/register", controller.createHandler);
  *       200:
  *         description: Lista de usuários
  */
-router.get("/", controller.getAllHandler);
+router.get("/", protectRoute, requireAdmin, controller.getAllHandler);
 
 /**
  * @swagger
@@ -121,7 +172,7 @@ router.get("/", controller.getAllHandler);
  *       404:
  *         description: Usuário não encontrado
  */
-router.get("/:id", controller.getByIdHandler);
+router.get("/:id", protectRoute, controller.getByIdHandler);
 
 /**
  * @swagger
@@ -146,7 +197,7 @@ router.get("/:id", controller.getByIdHandler);
  *       200:
  *         description: Usuário atualizado
  */
-router.put("/:id", upload.single("img"), controller.updateHandler);
+router.put("/:id", protectRoute, upload.single("img"), controller.updateHandler);
 
 /**
  * @swagger
@@ -165,6 +216,6 @@ router.put("/:id", upload.single("img"), controller.updateHandler);
  *       204:
  *         description: Usuário removido
  */
-router.delete("/:id", controller.deleteHandler);
+router.delete("/:id", protectRoute, controller.deleteHandler);
 
 export default router;

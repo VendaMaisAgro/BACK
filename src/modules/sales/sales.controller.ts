@@ -6,6 +6,21 @@ import { UploadS3Service } from "../upload-S3/uploadS3.service";
 const service = new SaleService();
 const s3Service = new UploadS3Service();
 
+type SaleAccess = { found: boolean; role: "admin" | "buyer" | "seller" | null };
+
+/** Verifica se o usuário autenticado é admin, o comprador ou um dos vendedores da venda. */
+async function getSaleAccess(req: Request, saleId: string): Promise<SaleAccess> {
+  const parties = await service.getSaleParties(saleId);
+  if (!parties) return { found: false, role: null };
+
+  if (req.user?.role === "admin") return { found: true, role: "admin" };
+  if (parties.buyerId === req.user?.userId) return { found: true, role: "buyer" };
+  if (req.user?.userId && parties.sellerIds.includes(req.user.userId)) {
+    return { found: true, role: "seller" };
+  }
+  return { found: true, role: null };
+}
+
 export class SaleController {
   public create: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -45,6 +60,18 @@ export class SaleController {
         res.status(404).json({ error: "Sale not found" });
         return;
       }
+
+      const isAdmin = req.user?.role === "admin";
+      const isBuyer = result.buyerId === req.user?.userId;
+      const isSeller = result.boughtProducts.some(
+        (bp: any) => bp.product?.sellerId === req.user?.userId
+      );
+
+      if (!isAdmin && !isBuyer && !isSeller) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       res.json(result);
     } catch (error: any) {
       console.error(error);
@@ -59,6 +86,12 @@ export class SaleController {
         res.status(400).json({ error: "userId deve ser uma string (UUID) válida" });
         return;
       }
+
+      if (req.user?.role !== "admin" && req.user?.userId !== userId) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const result = await service.getSalesForProducer(userId);
       res.json({
         message: "Vendas do producer obtidas com sucesso",
@@ -86,6 +119,12 @@ export class SaleController {
         res.status(400).json({ error: "userId deve ser uma string (UUID) válida" });
         return;
       }
+
+      if (req.user?.role !== "admin" && req.user?.userId !== userId) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const result = await service.getPurchasesForBuyer(userId);
       res.json({
         message: "Compras do buyer obtidas com sucesso",
@@ -109,6 +148,17 @@ export class SaleController {
   public update: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = req.params.id;
+
+      const access = await getSaleAccess(req, id);
+      if (!access.found) {
+        res.status(404).json({ error: "Sale not found" });
+        return;
+      }
+      if (!access.role) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const result = await service.update(id, req.body as UpdateSaleDataDto);
       res.json(result);
     } catch (error: any) {
@@ -136,6 +186,12 @@ export class SaleController {
   public delete: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
       const id = req.params.id;
+
+      if (req.user?.role !== "admin") {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       await service.delete(id);
       res.status(204).send();
     } catch (error: any) {
@@ -154,6 +210,16 @@ export class SaleController {
     }
 
     try {
+      const access = await getSaleAccess(req, id);
+      if (!access.found) {
+        res.status(404).json({ message: "Sale not found" });
+        return;
+      }
+      if (!access.role) {
+        res.status(403).json({ message: "Forbidden" });
+        return;
+      }
+
       const result = await service.calculateFreight(id, distanceKm, pricePerKm);
       res.status(200).json({ message: "Frete calculado com sucesso.", data: result });
     } catch (error: any) {
@@ -169,6 +235,16 @@ export class SaleController {
 
       if (typeof approved !== "boolean") {
         res.status(400).json({ error: "Campo 'approved' deve ser boolean." });
+        return;
+      }
+
+      const access = await getSaleAccess(req, id);
+      if (!access.found) {
+        res.status(404).json({ error: "Sale not found" });
+        return;
+      }
+      if (access.role !== "admin" && access.role !== "seller") {
+        res.status(403).json({ error: "Forbidden" });
         return;
       }
 
@@ -221,6 +297,16 @@ export class SaleController {
         return;
       }
 
+      const access = await getSaleAccess(req, saleId);
+      if (!access.found) {
+        res.status(404).json({ error: "Sale not found" });
+        return;
+      }
+      if (!access.role) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const doc = await service.uploadOperationDocument({ saleId, uploadedById, docType, fileUrl });
       res.status(201).json(doc);
     } catch (error: any) {
@@ -237,6 +323,17 @@ export class SaleController {
   public authorizeHarvest: RequestHandler = async (req, res) => {
     try {
       const saleId = req.params.id;
+
+      const access = await getSaleAccess(req, saleId);
+      if (!access.found) {
+        res.status(404).json({ error: "Venda não encontrada" });
+        return;
+      }
+      if (!access.role) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const result = await service.authorizeHarvest(saleId);
       res.status(200).json(result);
     } catch (error: any) {
@@ -271,6 +368,16 @@ export class SaleController {
 
       if (!paymentMethodId) {
         res.status(400).json({ error: 'paymentMethodId é obrigatório.' });
+        return;
+      }
+
+      const access = await getSaleAccess(req, saleId);
+      if (!access.found) {
+        res.status(404).json({ error: 'Venda não encontrada' });
+        return;
+      }
+      if (access.role !== 'admin' && access.role !== 'buyer') {
+        res.status(403).json({ error: 'Forbidden' });
         return;
       }
 
@@ -310,6 +417,16 @@ export class SaleController {
       const uploadedById = req.user?.userId as string | undefined;
       if (!uploadedById) {
         res.status(401).json({ error: 'Token inválido ou ausente.' });
+        return;
+      }
+
+      const access = await getSaleAccess(req, saleId);
+      if (!access.found) {
+        res.status(404).json({ error: 'Venda não encontrada' });
+        return;
+      }
+      if (access.role !== 'admin' && access.role !== 'seller') {
+        res.status(403).json({ error: 'Forbidden' });
         return;
       }
 
@@ -377,6 +494,11 @@ export class SaleController {
       const saleId = req.params.id;
       const { penaltyAmount, reason } = req.body;
 
+      if (req.user?.role !== 'admin') {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+
       if (!reason || typeof reason !== 'string' || !reason.trim()) {
         res.status(400).json({ error: 'O campo reason (motivo da multa) é obrigatório.' });
         return;
@@ -411,6 +533,17 @@ export class SaleController {
   public tacitAcceptance: RequestHandler = async (req, res) => {
     try {
       const saleId = req.params.id;
+
+      const access = await getSaleAccess(req, saleId);
+      if (!access.found) {
+        res.status(404).json({ error: "Venda não encontrada" });
+        return;
+      }
+      if (!access.role) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const result = await service.processTacitAcceptance(saleId);
       res.json(result);
     } catch (error: any) {

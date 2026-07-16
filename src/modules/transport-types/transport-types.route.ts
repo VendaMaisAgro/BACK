@@ -1,5 +1,5 @@
 import express, { RequestHandler } from 'express';
-import { protectRoute } from '../../middlewares/auth.middleware';
+import { protectRoute, requireAdmin } from '../../middlewares/auth.middleware';
 import { TransportTypesController } from './transport-types.controller';
 
 const router = express.Router();
@@ -29,7 +29,7 @@ router.use(protectRoute);
  *           type: number
  *           example: 10.5
  */
-router.post('/', controller.create as RequestHandler);
+router.post('/', requireAdmin as RequestHandler, controller.create as RequestHandler);
 
 /**
  * @swagger
@@ -69,7 +69,7 @@ router.post('/', controller.create as RequestHandler);
 router.get('/', controller.getAll as RequestHandler);
 
 router.get('/:id', controller.getById as RequestHandler);
-router.put('/:id', controller.update as RequestHandler);
-router.delete('/:id', controller.delete as RequestHandler);
+router.put('/:id', requireAdmin as RequestHandler, controller.update as RequestHandler);
+router.delete('/:id', requireAdmin as RequestHandler, controller.delete as RequestHandler);
 
 export default router;

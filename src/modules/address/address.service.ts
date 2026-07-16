@@ -32,6 +32,10 @@ export class AddressService {
     });
   }
 
+  async findById(addressId: string) {
+    return prisma.address.findUnique({ where: { id: addressId } });
+  }
+
   async updateAddress(addressId: string, data: any) {
     const existing = await prisma.address.findUnique({ where: { id: addressId } });
     if (!existing) throw new Error("Endereço não encontrado.");
@@ -43,7 +47,21 @@ export class AddressService {
       });
     }
 
-    return prisma.address.update({ where: { id: addressId }, data });
+    const updateData = {
+      ...(data.addressee !== undefined && { addressee: data.addressee }),
+      ...(data.phone_number_addressee !== undefined && { phone_number_addressee: data.phone_number_addressee }),
+      ...(data.alias !== undefined && { alias: data.alias }),
+      ...(data.street !== undefined && { street: data.street }),
+      ...(data.number !== undefined && { number: data.number }),
+      ...(data.complement !== undefined && { complement: data.complement }),
+      ...(data.referencePoint !== undefined && { referencePoint: data.referencePoint }),
+      ...(data.cep !== undefined && { cep: data.cep }),
+      ...(data.uf !== undefined && { uf: data.uf }),
+      ...(data.city !== undefined && { city: data.city }),
+      ...(data.default !== undefined && { default: !!data.default }),
+    };
+
+    return prisma.address.update({ where: { id: addressId }, data: updateData });
   }
 
   async deleteAddress(addressId: string) {

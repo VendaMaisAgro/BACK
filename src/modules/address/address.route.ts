@@ -1,8 +1,10 @@
-import { Router } from "express";
+import { Router, RequestHandler } from "express";
 import { AddressController } from "./address.controller";
+import { protectRoute } from "../../middlewares/auth.middleware";
 
 const controller = new AddressController();
 const router = Router();
+router.use(protectRoute as RequestHandler);
 
 /**
  * @swagger

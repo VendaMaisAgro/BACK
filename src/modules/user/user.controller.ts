@@ -15,6 +15,15 @@ export class UserController {
     }
   }
 
+  public createAdminHandler: RequestHandler = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const admin = await service.createAdmin(req.body);
+      res.status(201).json({ message: 'Usuário admin criado com sucesso!', user: admin });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  };
+
   public getAllHandler: RequestHandler = async (_req: Request, res: Response): Promise<void> => {
     try {
       const result = await service.getAll();
@@ -34,6 +43,12 @@ export class UserController {
         res.status(400).json({ error: 'ID deve ser um UUID válido' });
         return;
       }
+
+      if (req.user?.role !== 'admin' && req.user?.userId !== id) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+
       const result = await service.getById(id);
       if (!result) {
         res.status(404).json({ error: 'User not found' });
@@ -57,6 +72,11 @@ export class UserController {
         return;
       }
 
+      if (req.user?.role !== 'admin' && req.user?.userId !== id) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+
       const file = req.file;
       const result = await service.update(id, req.body, file);
       res.status(200).json(result);
@@ -73,6 +93,11 @@ export class UserController {
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(id)) {
         res.status(400).json({ error: 'ID deve ser um UUID válido' });
+        return;
+      }
+
+      if (req.user?.role !== 'admin' && req.user?.userId !== id) {
+        res.status(403).json({ error: 'Forbidden' });
         return;
       }
 

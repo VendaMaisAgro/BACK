@@ -1,7 +1,29 @@
 import { RequestHandler, Request, Response } from 'express';
 import { PaymentService } from './payment.service';
+import { SaleService } from '../sales/sales.service';
 
 const service = new PaymentService();
+const saleService = new SaleService();
+
+type PartyRole = 'admin' | 'buyer' | 'seller' | null;
+
+/** Retorna o papel do usuário autenticado em relação à venda (admin, comprador, vendedor ou nenhum). */
+async function getRoleForSale(req: Request, saleId: string): Promise<PartyRole> {
+    if (req.user?.role === 'admin') return 'admin';
+    const parties = await saleService.getSaleParties(saleId);
+    if (!parties) return null;
+    if (parties.buyerId === req.user?.userId) return 'buyer';
+    if (req.user?.userId && parties.sellerIds.includes(req.user.userId)) return 'seller';
+    return null;
+}
+
+/** Mesma checagem, mas a partir do ID do pagamento (resolve a venda internamente). */
+async function getRoleForPayment(req: Request, paymentId: string): Promise<{ saleId: string | null; role: PartyRole }> {
+    const saleId = await service.getSaleIdForPayment(paymentId);
+    if (!saleId) return { saleId: null, role: null };
+    const role = await getRoleForSale(req, saleId);
+    return { saleId, role };
+}
 
 export class PaymentController {
     public createPreference: RequestHandler = async (
@@ -14,6 +36,17 @@ export class PaymentController {
                 res.status(400).json({ error: 'Dados obrigatórios não fornecidos.' });
                 return;
             }
+
+            const role = await getRoleForSale(req, saleId);
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+            }
+            if (role === 'seller') {
+                res.status(403).json({ error: 'Somente o comprador pode iniciar o pagamento.' });
+                return;
+            }
+
             const result = await service.createPreference({
                 saleId,
                 paymentMethodId,
@@ -48,6 +81,13 @@ export class PaymentController {
                 res.status(404).json({ error: 'Pagamento não encontrado.' });
                 return;
             }
+
+            const role = await getRoleForSale(req, payment.saleId);
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+            }
+
             res.json(payment);
         } catch (error: any) {
             console.error(error);
@@ -68,6 +108,12 @@ export class PaymentController {
                 res.status(400).json({ error: 'ID inválido.' });
                 return;
             }
+
+            if (req.user?.role !== 'admin') {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+            }
+
             const data = req.body;
             const updated = await service.updatePayment(paymentId, data);
             res.json(updated);
@@ -100,6 +146,16 @@ export class PaymentController {
             const paymentId = req.params.id;
             if (!paymentId) {
                 res.status(400).json({ error: 'ID do pagamento é obrigatório.' });
+                return;
+            }
+
+            const { saleId, role } = await getRoleForPayment(req, paymentId);
+            if (!saleId) {
+                res.status(404).json({ error: 'Pagamento não encontrado.' });
+                return;
+            }
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden' });
                 return;
             }
 
@@ -144,6 +200,11 @@ export class PaymentController {
             const paymentId = req.params.id;
             if (!paymentId) {
                 res.status(400).json({ error: 'ID do pagamento é obrigatório.' });
+                return;
+            }
+
+            if (req.user?.role !== 'admin') {
+                res.status(403).json({ error: 'Forbidden' });
                 return;
             }
 
@@ -222,6 +283,16 @@ export class PaymentController {
                 }
             }
 
+            const pixRole = await getRoleForSale(req, saleId);
+            if (!pixRole) {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+            }
+            if (pixRole === 'seller') {
+                res.status(403).json({ error: 'Somente o comprador pode iniciar o pagamento.' });
+                return;
+            }
+
             const result = await service.createPixPayment({
                 saleId,
                 paymentMethodId,
@@ -261,6 +332,16 @@ export class PaymentController {
                 return;
             }
 
+            const boletoRole = await getRoleForSale(req, saleId);
+            if (!boletoRole) {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+            }
+            if (boletoRole === 'seller') {
+                res.status(403).json({ error: 'Somente o comprador pode iniciar o pagamento.' });
+                return;
+            }
+
             const result = await service.createBoletoPayment({ saleId, paymentMethodId, amount, expirationDays, phase });
 
             res.status(201).json(result);
@@ -285,6 +366,16 @@ export class PaymentController {
 
             if (!paymentId) {
                 res.status(400).json({ error: 'ID do pagamento é obrigatório.' });
+                return;
+            }
+
+            const { saleId, role } = await getRoleForPayment(req, paymentId);
+            if (!saleId) {
+                res.status(404).json({ error: 'Pagamento não encontrado.' });
+                return;
+            }
+            if (role !== 'admin' && role !== 'buyer') {
+                res.status(403).json({ error: 'Forbidden' });
                 return;
             }
 
@@ -315,6 +406,13 @@ export class PaymentController {
                 res.status(400).json({ error: 'saleId é obrigatório.' });
                 return;
             }
+
+            const role = await getRoleForSale(req, saleId);
+            if (!role) {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+            }
+
             const result = await service.getFinalInstallmentAmount(saleId);
             res.json(result);
         } catch (error: any) {
@@ -348,6 +446,16 @@ export class PaymentController {
 
             if (amount !== undefined && (typeof amount !== 'number' || amount <= 0)) {
                 res.status(400).json({ error: 'O valor do pagamento deve ser um número maior que zero.' });
+                return;
+            }
+
+            const finalBoletoRole = await getRoleForSale(req, saleId);
+            if (!finalBoletoRole) {
+                res.status(403).json({ error: 'Forbidden' });
+                return;
+            }
+            if (finalBoletoRole === 'seller') {
+                res.status(403).json({ error: 'Somente o comprador pode iniciar o pagamento.' });
                 return;
             }
 

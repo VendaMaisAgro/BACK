@@ -115,6 +115,23 @@ export class SaleService {
     }
   }
 
+  /** Retorna comprador e vendedores envolvidos numa venda, para checagem de autorização. */
+  async getSaleParties(saleId: string): Promise<{ buyerId: string; sellerIds: string[] } | null> {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: saleId },
+      select: {
+        buyerId: true,
+        boughtProducts: { select: { product: { select: { sellerId: true } } } },
+      },
+    });
+    if (!sale) return null;
+
+    return {
+      buyerId: sale.buyerId,
+      sellerIds: sale.boughtProducts.map((bp) => bp.product.sellerId),
+    };
+  }
+
   async getAll() {
     return this.prisma.saleData.findMany({
       include: { boughtProducts: true },
@@ -142,7 +159,7 @@ export class SaleService {
       const sale = await tx.saleData.findUnique({
         where: { id },
         include: {
-          boughtProducts: true,
+          boughtProducts: { include: { product: { select: { sellerId: true } } } },
           Payment: true,
         },
       });

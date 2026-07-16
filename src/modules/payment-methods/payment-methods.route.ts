@@ -1,5 +1,5 @@
 import express, { RequestHandler } from 'express';
-import { protectRoute } from '../../middlewares/auth.middleware';
+import { protectRoute, requireAdmin } from '../../middlewares/auth.middleware';
 import { PaymentMethodsController } from './payment-methods.controller';
 
 const router = express.Router();
@@ -61,7 +61,7 @@ router.use(protectRoute);
  *           format: date-time
  */
 
-router.post('/', controller.create as RequestHandler);
+router.post('/', requireAdmin as RequestHandler, controller.create as RequestHandler);
 
 /**
  * @swagger
@@ -186,7 +186,7 @@ router.get('/:id', controller.getPaymentMethodById as RequestHandler);
  *                   type: string
  *                   example: "Falha ao atualizar o método de pagamento, por favor tente novamente."
  */
-router.put('/:id', controller.update as RequestHandler);
+router.put('/:id', requireAdmin as RequestHandler, controller.update as RequestHandler);
 
 /**
  * @swagger
@@ -226,6 +226,6 @@ router.put('/:id', controller.update as RequestHandler);
  *                   type: string
  *                   example: "Falha ao deletar o método de pagamento, por favor tente novamente."
  */
-router.delete('/:id', controller.delete as RequestHandler);
+router.delete('/:id', requireAdmin as RequestHandler, controller.delete as RequestHandler);
 
 export default router;
