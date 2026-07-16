@@ -205,7 +205,12 @@ export class SellingUnitProductController {
       res.status(201).json(result);
     } catch (error: any) {
       console.error(error);
-      if (error.message && (error.message.includes('obrigatórios') || error.message.includes('Já existe'))) {
+      if (
+        error.message &&
+        (error.message.includes('obrigatórios') ||
+          error.message.includes('Já existe') ||
+          error.message.includes('devem ser strings'))
+      ) {
         return res.status(400).json({ error: error.message });
       }
       res.status(500).json({ error: "Erro interno do servidor ao criar unidade de medida" });

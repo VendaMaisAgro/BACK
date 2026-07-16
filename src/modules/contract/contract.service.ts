@@ -201,11 +201,17 @@ export class ContractService {
     return [...ids];
   }
 
-  /** Busca buyerId e sellerIds em uma única consulta (evita 2 round-trips ao banco). */
+  /**
+   * Busca buyerId e sellerIds em uma única consulta (evita 2 round-trips ao banco).
+   * Usado só para checagem de autorização, então seleciona apenas as colunas necessárias.
+   */
   async getSaleParties(saleId: string): Promise<{ buyerId: string; sellerIds: string[] } | null> {
     const sale = await prisma.saleData.findUnique({
       where: { id: saleId },
-      include: { boughtProducts: { include: { product: true } } },
+      select: {
+        buyerId: true,
+        boughtProducts: { select: { product: { select: { sellerId: true } } } },
+      },
     });
     if (!sale) return null;
 
@@ -214,8 +220,6 @@ export class ContractService {
       const sid = bp.product?.sellerId;
       if (typeof sid === 'string') sellerIds.add(sid);
     }
-    const legacySellerId = (sale as any).sellerId;
-    if (typeof legacySellerId === 'string') sellerIds.add(legacySellerId);
 
     return { buyerId: sale.buyerId, sellerIds: [...sellerIds] };
   }

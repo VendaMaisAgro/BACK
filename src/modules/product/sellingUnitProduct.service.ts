@@ -224,8 +224,12 @@ export class SellingUnitProductService {
   }
 
   async createSellingUnit(data: { unit: string; title: string }) {
-    const unit = typeof data.unit === 'string' ? data.unit.trim().toLowerCase() : data.unit;
-    const title = typeof data.title === 'string' ? data.title.trim() : data.title;
+    if (typeof data.unit !== 'string' || typeof data.title !== 'string') {
+      throw new Error('unit e title devem ser strings');
+    }
+
+    const unit = data.unit.trim().toLowerCase();
+    const title = data.title.trim();
 
     if (!unit || !title) {
       throw new Error('unit e title são obrigatórios');

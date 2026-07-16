@@ -70,7 +70,7 @@ router.post('/', requireAdmin as RequestHandler, controller.create as RequestHan
  *     summary: Busca todos os métodos de pagamento disponíveis
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Lista de métodos de pagamento
@@ -100,7 +100,7 @@ router.get('/', controller.getAll as RequestHandler);
  *     summary: Busca um método de pagamento por ID
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -146,7 +146,7 @@ router.get('/:id', controller.getPaymentMethodById as RequestHandler);
  *     summary: Atualiza um método de pagamento por ID
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -195,7 +195,7 @@ router.put('/:id', requireAdmin as RequestHandler, controller.update as RequestH
  *     summary: Deleta um método de pagamento por ID
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
