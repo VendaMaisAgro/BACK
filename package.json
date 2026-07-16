@@ -11,6 +11,7 @@
     "start-b": "docker compose -f docker/docker-compose.yml up --build",
     "stop": "docker compose -f docker/docker-compose.yml down",
     "setup": "chmod +x ./entrypoint.sh",
+    "create-admin": "ts-node scripts/create-admin.ts",
     "seed-units": "ts-node scripts/seed-selling-units.ts",
     "seed-sales": "ts-node scripts/seed-sales-data.ts",
     "seed": "prisma db seed",

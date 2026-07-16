@@ -2,6 +2,7 @@ import { PrismaClient, User } from '@prisma/client';
 import { RecoverPasswordDto } from './dto/recoverpassword.dto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '../../config/jwt.config';
 
 const prisma = new PrismaClient();
 
@@ -18,8 +19,6 @@ interface LoginResponse {
 
 
 export class AuthService {
-  private jwtSecret = process.env.JWT_SECRET || 'your_jwt_secret';
-
   public async login({ cpf, cnpj, password }: LoginInput): Promise<LoginResponse> {
     const document = cpf ?? cnpj;
 
@@ -51,7 +50,7 @@ export class AuthService {
         name: user.name,
         email: user.email,
       },
-      this.jwtSecret,
+      JWT_SECRET,
       { expiresIn: '30d' }
     );
 

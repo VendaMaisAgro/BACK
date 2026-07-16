@@ -1,5 +1,5 @@
 import express, { RequestHandler } from 'express';
-import { protectRoute } from '../../middlewares/auth.middleware';
+import { protectRoute, requireAdmin } from '../../middlewares/auth.middleware';
 import { PaymentController } from './payment.controller';
 
 const router = express.Router();
@@ -252,7 +252,7 @@ router.post('/pix', controller.createPixPayment as RequestHandler);
  */
 router.post('/boleto', controller.createBoletoPayment as RequestHandler);
 router.post('/final-boleto', controller.createFinalBoleto as RequestHandler);
-router.post('/configure-webhook', controller.configureWebhook as RequestHandler);
+router.post('/configure-webhook', requireAdmin as RequestHandler, controller.configureWebhook as RequestHandler);
 
 /**
  * @swagger
@@ -293,7 +293,7 @@ router.post('/configure-webhook', controller.configureWebhook as RequestHandler)
  *       500:
  *         description: Erro ao executar sincronização
  */
-router.post('/sync-pending', controller.syncPendingOrderPayments as RequestHandler);
+router.post('/sync-pending', requireAdmin as RequestHandler, controller.syncPendingOrderPayments as RequestHandler);
 
 // Calcula o valor da segunda parcela — duas formas de URL para compatibilidade com o frontend
 router.get('/sales/:saleId/final-amount', controller.getFinalInstallmentAmount as RequestHandler);

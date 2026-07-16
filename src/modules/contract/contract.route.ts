@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ContractController } from './contract.controller';
-import { protectRoute } from '../../middlewares/auth.middleware';
+import { protectRoute, requireAdmin } from '../../middlewares/auth.middleware';
 
 const router = Router();
 const controller = new ContractController();
@@ -148,7 +148,7 @@ router.get('/pdf', wrap(controller.generate.bind(controller)));
  *       400:
  *         description: content e version são obrigatórios
  */
-router.post('/version', protectRoute, wrap(controller.createVersion.bind(controller)));
+router.post('/version', protectRoute, requireAdmin, wrap(controller.createVersion.bind(controller)));
 
 /**
  * @swagger

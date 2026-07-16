@@ -198,4 +198,61 @@ export class SellingUnitProductController {
       res.status(500).json({ error: "Erro interno do servidor ao listar unidades de venda" });
     }
   }
+
+  async createSellingUnit(req: Request, res: Response) {
+    try {
+      const result = await service.createSellingUnit(req.body);
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error(error);
+      if (
+        error.message &&
+        (error.message.includes('obrigatórios') ||
+          error.message.includes('Já existe') ||
+          error.message.includes('devem ser strings'))
+      ) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Erro interno do servidor ao criar unidade de medida" });
+    }
+  }
+
+  async updateSellingUnit(req: Request, res: Response) {
+    try {
+      const id = req.params.id;
+      const result = await service.updateSellingUnit(id, req.body);
+      res.json(result);
+    } catch (error: any) {
+      console.error(error);
+      if (error.message && error.message.includes('não encontrada')) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (
+        error.message &&
+        (error.message.includes('Já existe') ||
+          error.message.includes('não pode ser vazio') ||
+          error.message.includes('deve ser uma string'))
+      ) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Erro interno do servidor ao atualizar unidade de medida" });
+    }
+  }
+
+  async deleteSellingUnit(req: Request, res: Response) {
+    try {
+      const id = req.params.id;
+      await service.deleteSellingUnit(id);
+      res.status(204).send();
+    } catch (error: any) {
+      console.error(error);
+      if (error.message && error.message.includes('não encontrada')) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error.message && error.message.includes('Não é possível deletar')) {
+        return res.status(400).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Erro interno do servidor ao deletar unidade de medida" });
+    }
+  }
 }

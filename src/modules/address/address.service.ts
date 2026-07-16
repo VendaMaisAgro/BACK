@@ -1,6 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
+/** Normaliza valores vindos do payload (boolean, ou string "true"/"false") para um boolean real. */
+function toBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.trim().toLowerCase() === "true";
+  return !!value;
+}
+
 export class AddressService {
 
   async addAddress(userId: string, data: any) {
@@ -8,9 +15,9 @@ export class AddressService {
     if (!userExists) throw new Error("Usuário não encontrado.");
 
     const addressCount = await prisma.address.count({ where: { userId } });
-    if (addressCount === 0) data.default = true;
+    const isDefault = addressCount === 0 ? true : toBoolean(data.default);
 
-    if (data.default) {
+    if (isDefault) {
       await prisma.address.updateMany({ where: { userId }, data: { default: false } });
     }
 
@@ -27,23 +34,43 @@ export class AddressService {
         cep: data.cep,
         uf: data.uf,
         city: data.city,
-        default: !!data.default,
+        default: isDefault,
       },
     });
+  }
+
+  async findById(addressId: string) {
+    return prisma.address.findUnique({ where: { id: addressId } });
   }
 
   async updateAddress(addressId: string, data: any) {
     const existing = await prisma.address.findUnique({ where: { id: addressId } });
     if (!existing) throw new Error("Endereço não encontrado.");
 
-    if (data.default) {
+    const isDefault = data.default !== undefined ? toBoolean(data.default) : undefined;
+
+    if (isDefault) {
       await prisma.address.updateMany({
         where: { userId: existing.userId },
         data: { default: false },
       });
     }
 
-    return prisma.address.update({ where: { id: addressId }, data });
+    const updateData = {
+      ...(data.addressee !== undefined && { addressee: data.addressee }),
+      ...(data.phone_number_addressee !== undefined && { phone_number_addressee: data.phone_number_addressee }),
+      ...(data.alias !== undefined && { alias: data.alias }),
+      ...(data.street !== undefined && { street: data.street }),
+      ...(data.number !== undefined && { number: data.number }),
+      ...(data.complement !== undefined && { complement: data.complement }),
+      ...(data.referencePoint !== undefined && { referencePoint: data.referencePoint }),
+      ...(data.cep !== undefined && { cep: data.cep }),
+      ...(data.uf !== undefined && { uf: data.uf }),
+      ...(data.city !== undefined && { city: data.city }),
+      ...(isDefault !== undefined && { default: isDefault }),
+    };
+
+    return prisma.address.update({ where: { id: addressId }, data: updateData });
   }
 
   async deleteAddress(addressId: string) {

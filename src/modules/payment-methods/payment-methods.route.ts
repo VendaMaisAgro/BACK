@@ -1,5 +1,5 @@
 import express, { RequestHandler } from 'express';
-import { protectRoute } from '../../middlewares/auth.middleware';
+import { protectRoute, requireAdmin } from '../../middlewares/auth.middleware';
 import { PaymentMethodsController } from './payment-methods.controller';
 
 const router = express.Router();
@@ -61,7 +61,7 @@ router.use(protectRoute);
  *           format: date-time
  */
 
-router.post('/', controller.create as RequestHandler);
+router.post('/', requireAdmin as RequestHandler, controller.create as RequestHandler);
 
 /**
  * @swagger
@@ -70,7 +70,7 @@ router.post('/', controller.create as RequestHandler);
  *     summary: Busca todos os métodos de pagamento disponíveis
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Lista de métodos de pagamento
@@ -100,7 +100,7 @@ router.get('/', controller.getAll as RequestHandler);
  *     summary: Busca um método de pagamento por ID
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -146,7 +146,7 @@ router.get('/:id', controller.getPaymentMethodById as RequestHandler);
  *     summary: Atualiza um método de pagamento por ID
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -186,7 +186,7 @@ router.get('/:id', controller.getPaymentMethodById as RequestHandler);
  *                   type: string
  *                   example: "Falha ao atualizar o método de pagamento, por favor tente novamente."
  */
-router.put('/:id', controller.update as RequestHandler);
+router.put('/:id', requireAdmin as RequestHandler, controller.update as RequestHandler);
 
 /**
  * @swagger
@@ -195,7 +195,7 @@ router.put('/:id', controller.update as RequestHandler);
  *     summary: Deleta um método de pagamento por ID
  *     tags: [PaymentMethods]
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -226,6 +226,6 @@ router.put('/:id', controller.update as RequestHandler);
  *                   type: string
  *                   example: "Falha ao deletar o método de pagamento, por favor tente novamente."
  */
-router.delete('/:id', controller.delete as RequestHandler);
+router.delete('/:id', requireAdmin as RequestHandler, controller.delete as RequestHandler);
 
 export default router;

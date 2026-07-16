@@ -3,10 +3,20 @@ import { AddressService } from "./address.service";
 
 const service = new AddressService();
 
+function isSelfOrAdmin(req: Request, userId: string): boolean {
+  return req.user?.role === "admin" || req.user?.userId === userId;
+}
+
 export class AddressController {
   async add(req: Request, res: Response) {
     try {
       const { userId } = req.params;
+
+      if (!isSelfOrAdmin(req, userId)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const address = await service.addAddress(userId, req.body);
       res.status(201).json(address);
     } catch (err: any) {
@@ -17,6 +27,17 @@ export class AddressController {
   async update(req: Request, res: Response) {
     try {
       const { addressId } = req.params;
+
+      const existing = await service.findById(addressId);
+      if (!existing) {
+        res.status(404).json({ error: "Endereço não encontrado" });
+        return;
+      }
+      if (!isSelfOrAdmin(req, existing.userId)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const address = await service.updateAddress(addressId.toString(), req.body);
       res.json(address);
     } catch (err: any) {
@@ -27,6 +48,17 @@ export class AddressController {
   async remove(req: Request, res: Response) {
     try {
       const { addressId } = req.params;
+
+      const existing = await service.findById(addressId);
+      if (!existing) {
+        res.status(404).json({ error: "Endereço não encontrado" });
+        return;
+      }
+      if (!isSelfOrAdmin(req, existing.userId)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       await service.deleteAddress(addressId.toString());
       res.status(204).send();
     } catch (err: any) {
@@ -37,6 +69,12 @@ export class AddressController {
   async list(req: Request, res: Response) {
     try {
       const { userId } = req.params;
+
+      if (!isSelfOrAdmin(req, userId)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const addresses = await service.listUserAddresses(userId);
       res.json(addresses);
     } catch (err: any) {
@@ -48,6 +86,12 @@ export class AddressController {
     try {
       const { userId } = req.params;
       const { addressId } = req.params;
+
+      if (!isSelfOrAdmin(req, userId)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+
       const address = await service.setDefaultAddress(userId, addressId);
       res.json(address);
     } catch (err: any) {

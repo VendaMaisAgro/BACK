@@ -22,6 +22,18 @@ const parseId = (v: unknown): number | undefined => {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 
+/** Verifica se o usuário autenticado é admin, o comprador ou um dos vendedores da venda. */
+async function isPartyOrAdmin(req: Request, saleId: string): Promise<boolean> {
+  if (req.user?.role === 'admin') return true;
+  const authUserId = req.user?.userId;
+  if (!authUserId) return false;
+
+  const parties = await service.getSaleParties(saleId);
+  if (!parties) return false;
+
+  return parties.buyerId === authUserId || parties.sellerIds.includes(authUserId);
+}
+
 export class ContractController {
   async generate(req: Request, res: Response) {
     const kind = parseKind(req.query.kind);
@@ -90,6 +102,10 @@ export class ContractController {
   async statusBySale(req: Request, res: Response) {
     const saleId = String(req.params.saleId);
     if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
+
+    if (!(await isPartyOrAdmin(req, saleId))) {
+      return res.status(403).json({ message: 'Usuário não pertence a esta venda' });
+    }
 
     const s = await service.getAcceptanceStatusBySale(saleId);
     if (!s) return res.status(404).json({ message: 'Nenhum aceite para esta venda' });
@@ -232,6 +248,10 @@ export class ContractController {
       const saleId = String(req.params.saleId);
       if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
 
+      if (!(await isPartyOrAdmin(req, saleId))) {
+        return res.status(403).json({ message: 'Usuário não pertence a esta venda' });
+      }
+
       const kind = parseKind(req.query.kind);
       const sellerId = parseId(req.query.sellerId);
 
@@ -262,6 +282,10 @@ export class ContractController {
       const saleId = String(req.params.saleId);
       if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
 
+      if (!(await isPartyOrAdmin(req, saleId))) {
+        return res.status(403).json({ message: 'Usuário não pertence a esta venda' });
+      }
+
       const sellerId = req.query.sellerId ? String(req.query.sellerId) : undefined;
       const ctx = await service.getSaleContractContext(saleId, sellerId);
       return res.json(ctx);
@@ -281,6 +305,10 @@ export class ContractController {
     try {
       const saleId = String(req.params.saleId);
       if (!saleId) return res.status(400).json({ message: 'saleId inválido' });
+
+      if (!(await isPartyOrAdmin(req, saleId))) {
+        return res.status(403).json({ message: 'Usuário não pertence a esta venda' });
+      }
 
       const kind = parseKind(req.query.kind);
       const sellerId = parseId(req.query.sellerId);

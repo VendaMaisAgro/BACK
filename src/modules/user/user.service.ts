@@ -22,6 +22,11 @@ export class UserService {
       throw new Error("Campos obrigatórios faltando.");
     }
 
+    const allowedRoles = ["buyer", "producer"];
+    if (!allowedRoles.includes(role)) {
+      throw new Error("Perfil inválido.");
+    }
+
     if (!cpf && !cnpj) {
       throw new Error("CPF ou CNPJ é obrigatório.");
     }
@@ -105,8 +110,86 @@ export class UserService {
     }
   }
 
-  public async getAll(): Promise<User[]> {
-    return this.prisma.user.findMany();
+  public async createAdmin(data: any): Promise<Omit<User, 'password'>> {
+    const { name, phone_number, email, password, cpf, cnpj } = data;
+
+    if (!name || !phone_number || !email || !password) {
+      throw new Error("Campos obrigatórios faltando.");
+    }
+
+    if (!cpf && !cnpj) {
+      throw new Error("CPF ou CNPJ é obrigatório.");
+    }
+
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      throw new Error(
+        "A senha deve conter pelo menos 8 caracteres, incluindo uma letra maiúscula, uma letra minúscula, um número e um caractere especial."
+      );
+    }
+
+    let formattedCpf: string | null = null;
+    if (cpf) {
+      if (!isCPF(cpf)) {
+        throw new Error("CPF inválido.");
+      }
+      formattedCpf = formatToCPF(cpf);
+      const existingCpf = await this.prisma.user.findUnique({ where: { cpf: formattedCpf } });
+      if (existingCpf) {
+        throw new Error("CPF já cadastrado.");
+      }
+    }
+
+    let formattedCnpj: string | null = null;
+    if (cnpj) {
+      if (!isCNPJ(cnpj)) {
+        throw new Error("CNPJ inválido.");
+      }
+      formattedCnpj = formatToCNPJ(cnpj);
+      const existingCnpj = await this.prisma.user.findUnique({ where: { cnpj: formattedCnpj } });
+      if (existingCnpj) {
+        throw new Error("CNPJ já cadastrado.");
+      }
+    }
+
+    const existingEmail = await this.prisma.user.findUnique({ where: { email } });
+    if (existingEmail) {
+      throw new Error("Email já cadastrado.");
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = await this.prisma.user.create({
+      data: {
+        name,
+        phone_number,
+        email,
+        password: hashedPassword,
+        cpf: formattedCpf,
+        cnpj: formattedCnpj,
+        role: "admin",
+      },
+    });
+
+    const { password: _, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
+
+  public async getAll(): Promise<Omit<User, 'password'>[]> {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        name: true,
+        phone_number: true,
+        email: true,
+        cnpj: true,
+        cpf: true,
+        ccir: true,
+        role: true,
+        img: true,
+        valid: true,
+      },
+    });
   }
 
   public async getById(id: string): Promise<any> {
@@ -147,6 +230,8 @@ export class UserService {
     }
 
     const updateData: any = { ...data };
+    delete updateData.role;
+    delete updateData.valid;
 
     if (data.password) {
       const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
