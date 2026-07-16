@@ -224,22 +224,25 @@ export class SellingUnitProductService {
   }
 
   async createSellingUnit(data: { unit: string; title: string }) {
-    if (!data.unit || !data.title) {
+    const unit = typeof data.unit === 'string' ? data.unit.trim().toLowerCase() : data.unit;
+    const title = typeof data.title === 'string' ? data.title.trim() : data.title;
+
+    if (!unit || !title) {
       throw new Error('unit e title são obrigatórios');
     }
 
     // Checagem rápida para UX; a garantia real contra concorrência é a constraint
     // única de banco (SellingUnit.unit @unique) — o P2002 abaixo cobre a corrida.
-    const existing = await prisma.sellingUnit.findFirst({ where: { unit: data.unit } });
+    const existing = await prisma.sellingUnit.findFirst({ where: { unit } });
     if (existing) {
-      throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+      throw new Error(`Já existe uma unidade de medida com o código "${unit}"`);
     }
 
     try {
-      return await prisma.sellingUnit.create({ data });
+      return await prisma.sellingUnit.create({ data: { unit, title } });
     } catch (error: any) {
       if (error.code === 'P2002') {
-        throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+        throw new Error(`Já existe uma unidade de medida com o código "${unit}"`);
       }
       throw error;
     }
@@ -251,12 +254,22 @@ export class SellingUnitProductService {
       throw new Error(`Unidade de medida com ID ${id} não encontrada`);
     }
 
-    if (data.unit && data.unit !== existing.unit) {
+    const unit = data.unit !== undefined ? data.unit.trim().toLowerCase() : undefined;
+    const title = data.title !== undefined ? data.title.trim() : undefined;
+
+    if (unit !== undefined && !unit) {
+      throw new Error('unit não pode ser vazio');
+    }
+    if (title !== undefined && !title) {
+      throw new Error('title não pode ser vazio');
+    }
+
+    if (unit !== undefined && unit !== existing.unit) {
       // Checagem rápida para UX; a garantia real contra concorrência é a constraint
       // única de banco (SellingUnit.unit @unique) — o P2002 abaixo cobre a corrida.
-      const duplicate = await prisma.sellingUnit.findFirst({ where: { unit: data.unit, id: { not: id } } });
+      const duplicate = await prisma.sellingUnit.findFirst({ where: { unit, id: { not: id } } });
       if (duplicate) {
-        throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+        throw new Error(`Já existe uma unidade de medida com o código "${unit}"`);
       }
     }
 
@@ -264,13 +277,13 @@ export class SellingUnitProductService {
       return await prisma.sellingUnit.update({
         where: { id },
         data: {
-          ...(data.unit !== undefined && { unit: data.unit }),
-          ...(data.title !== undefined && { title: data.title }),
+          ...(unit !== undefined && { unit }),
+          ...(title !== undefined && { title }),
         },
       });
     } catch (error: any) {
       if (error.code === 'P2002') {
-        throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+        throw new Error(`Já existe uma unidade de medida com o código "${unit}"`);
       }
       throw error;
     }

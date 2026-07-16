@@ -222,7 +222,7 @@ export class SellingUnitProductController {
       if (error.message && error.message.includes('não encontrada')) {
         return res.status(404).json({ error: error.message });
       }
-      if (error.message && error.message.includes('Já existe')) {
+      if (error.message && (error.message.includes('Já existe') || error.message.includes('não pode ser vazio'))) {
         return res.status(400).json({ error: error.message });
       }
       res.status(500).json({ error: "Erro interno do servidor ao atualizar unidade de medida" });
