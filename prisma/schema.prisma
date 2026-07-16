@@ -224,7 +224,7 @@ model BoughtProduct {
 
 model SellingUnit {
   id    String @id @default(uuid())
-  unit  String
+  unit  String @unique
   title String
 
   sellingUnitProduct SellingUnitProduct[]

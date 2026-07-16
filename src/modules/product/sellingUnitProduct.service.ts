@@ -228,12 +228,21 @@ export class SellingUnitProductService {
       throw new Error('unit e title são obrigatórios');
     }
 
+    // Checagem rápida para UX; a garantia real contra concorrência é a constraint
+    // única de banco (SellingUnit.unit @unique) — o P2002 abaixo cobre a corrida.
     const existing = await prisma.sellingUnit.findFirst({ where: { unit: data.unit } });
     if (existing) {
       throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
     }
 
-    return prisma.sellingUnit.create({ data });
+    try {
+      return await prisma.sellingUnit.create({ data });
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+      }
+      throw error;
+    }
   }
 
   async updateSellingUnit(id: string, data: { unit?: string; title?: string }) {
@@ -243,19 +252,28 @@ export class SellingUnitProductService {
     }
 
     if (data.unit && data.unit !== existing.unit) {
+      // Checagem rápida para UX; a garantia real contra concorrência é a constraint
+      // única de banco (SellingUnit.unit @unique) — o P2002 abaixo cobre a corrida.
       const duplicate = await prisma.sellingUnit.findFirst({ where: { unit: data.unit, id: { not: id } } });
       if (duplicate) {
         throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
       }
     }
 
-    return prisma.sellingUnit.update({
-      where: { id },
-      data: {
-        ...(data.unit !== undefined && { unit: data.unit }),
-        ...(data.title !== undefined && { title: data.title }),
-      },
-    });
+    try {
+      return await prisma.sellingUnit.update({
+        where: { id },
+        data: {
+          ...(data.unit !== undefined && { unit: data.unit }),
+          ...(data.title !== undefined && { title: data.title }),
+        },
+      });
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        throw new Error(`Já existe uma unidade de medida com o código "${data.unit}"`);
+      }
+      throw error;
+    }
   }
 
   async deleteSellingUnit(id: string) {
