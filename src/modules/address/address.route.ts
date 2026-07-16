@@ -59,8 +59,10 @@ router.use(protectRoute as RequestHandler);
  *
  * /address/{userId}:
  *   post:
- *     summary: Adiciona um endereço para o usuário
+ *     summary: Adiciona um endereço para o usuário (somente o próprio usuário ou admin)
  *     tags: [Address]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -83,6 +85,10 @@ router.use(protectRoute as RequestHandler);
  *               $ref: '#/components/schemas/Address'
  *       400:
  *         description: Erro ao adicionar endereço
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o próprio usuário ou admin
  */
 router.post("/:userId", controller.add);
 
@@ -90,8 +96,10 @@ router.post("/:userId", controller.add);
  * @swagger
  * /address/set-default/{userId}/{addressId}:
  *   put:
- *     summary: Define um endereço como padrão
+ *     summary: Define um endereço como padrão (somente o próprio usuário ou admin)
  *     tags: [Address]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -110,6 +118,10 @@ router.post("/:userId", controller.add);
  *         description: Endereço definido como padrão
  *       400:
  *         description: Erro ao definir endereço padrão
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o próprio usuário ou admin
  */
 router.put("/set-default/:userId/:addressId", controller.setDefault);
 
@@ -117,8 +129,10 @@ router.put("/set-default/:userId/:addressId", controller.setDefault);
  * @swagger
  * /address/{addressId}:
  *   put:
- *     summary: Atualiza um endereço
+ *     summary: Atualiza um endereço (somente o dono do endereço ou admin)
  *     tags: [Address]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: addressId
@@ -141,6 +155,12 @@ router.put("/set-default/:userId/:addressId", controller.setDefault);
  *               $ref: '#/components/schemas/Address'
  *       400:
  *         description: Erro ao atualizar endereço
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o dono do endereço ou admin
+ *       404:
+ *         description: Endereço não encontrado
  */
 router.put("/:addressId", controller.update);
 
@@ -148,8 +168,10 @@ router.put("/:addressId", controller.update);
  * @swagger
  * /address/{addressId}:
  *   delete:
- *     summary: Remove um endereço
+ *     summary: Remove um endereço (somente o dono do endereço ou admin)
  *     tags: [Address]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: addressId
@@ -162,6 +184,12 @@ router.put("/:addressId", controller.update);
  *         description: Endereço removido
  *       400:
  *         description: Erro ao remover endereço
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o dono do endereço ou admin
+ *       404:
+ *         description: Endereço não encontrado
  */
 router.delete("/:addressId", controller.remove);
 
@@ -169,8 +197,10 @@ router.delete("/:addressId", controller.remove);
  * @swagger
  * /address/user/{userId}:
  *   get:
- *     summary: Lista endereços de um usuário
+ *     summary: Lista endereços de um usuário (somente o próprio usuário ou admin)
  *     tags: [Address]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: userId
@@ -189,6 +219,10 @@ router.delete("/:addressId", controller.remove);
  *                 $ref: '#/components/schemas/Address'
  *       400:
  *         description: Erro ao listar endereços
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o próprio usuário ou admin
  */
 router.get("/user/:userId", controller.list);
 

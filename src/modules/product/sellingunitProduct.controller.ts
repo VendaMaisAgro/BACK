@@ -219,7 +219,10 @@ export class SellingUnitProductController {
       res.json(result);
     } catch (error: any) {
       console.error(error);
-      if (error.message && (error.message.includes('não encontrada') || error.message.includes('Já existe'))) {
+      if (error.message && error.message.includes('não encontrada')) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error.message && error.message.includes('Já existe')) {
         return res.status(400).json({ error: error.message });
       }
       res.status(500).json({ error: "Erro interno do servidor ao atualizar unidade de medida" });

@@ -145,11 +145,17 @@ router.post("/admin", protectRoute, requireAdmin, controller.createAdminHandler)
  * @swagger
  * /user:
  *   get:
- *     summary: Lista todos os usuários
+ *     summary: Lista todos os usuários (somente admin)
  *     tags: [User]
+ *     security:
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Lista de usuários
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer perfil admin
  */
 router.get("/", protectRoute, requireAdmin, controller.getAllHandler);
 
@@ -157,8 +163,10 @@ router.get("/", protectRoute, requireAdmin, controller.getAllHandler);
  * @swagger
  * /user/{id}:
  *   get:
- *     summary: Busca usuário por ID
+ *     summary: Busca usuário por ID (somente o próprio usuário ou admin)
  *     tags: [User]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -169,6 +177,10 @@ router.get("/", protectRoute, requireAdmin, controller.getAllHandler);
  *     responses:
  *       200:
  *         description: Usuário encontrado
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o próprio usuário ou admin
  *       404:
  *         description: Usuário não encontrado
  */
@@ -178,8 +190,10 @@ router.get("/:id", protectRoute, controller.getByIdHandler);
  * @swagger
  * /user/{id}:
  *   put:
- *     summary: Atualiza um usuário
+ *     summary: Atualiza um usuário (somente o próprio usuário ou admin)
  *     tags: [User]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -196,6 +210,10 @@ router.get("/:id", protectRoute, controller.getByIdHandler);
  *     responses:
  *       200:
  *         description: Usuário atualizado
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o próprio usuário ou admin
  */
 router.put("/:id", protectRoute, upload.single("img"), controller.updateHandler);
 
@@ -203,8 +221,10 @@ router.put("/:id", protectRoute, upload.single("img"), controller.updateHandler)
  * @swagger
  * /user/{id}:
  *   delete:
- *     summary: Remove um usuário
+ *     summary: Remove um usuário (somente o próprio usuário ou admin)
  *     tags: [User]
+ *     security:
+ *       - BearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -215,6 +235,10 @@ router.put("/:id", protectRoute, upload.single("img"), controller.updateHandler)
  *     responses:
  *       204:
  *         description: Usuário removido
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Requer ser o próprio usuário ou admin
  */
 router.delete("/:id", protectRoute, controller.deleteHandler);
 

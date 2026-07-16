@@ -3,16 +3,16 @@ import { AddressService } from "./address.service";
 
 const service = new AddressService();
 
-export class AddressController {
-  private isSelfOrAdmin(req: Request, userId: string): boolean {
-    return req.user?.role === "admin" || req.user?.userId === userId;
-  }
+function isSelfOrAdmin(req: Request, userId: string): boolean {
+  return req.user?.role === "admin" || req.user?.userId === userId;
+}
 
+export class AddressController {
   async add(req: Request, res: Response) {
     try {
       const { userId } = req.params;
 
-      if (!this.isSelfOrAdmin(req, userId)) {
+      if (!isSelfOrAdmin(req, userId)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -33,7 +33,7 @@ export class AddressController {
         res.status(404).json({ error: "Endereço não encontrado" });
         return;
       }
-      if (!this.isSelfOrAdmin(req, existing.userId)) {
+      if (!isSelfOrAdmin(req, existing.userId)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -54,7 +54,7 @@ export class AddressController {
         res.status(404).json({ error: "Endereço não encontrado" });
         return;
       }
-      if (!this.isSelfOrAdmin(req, existing.userId)) {
+      if (!isSelfOrAdmin(req, existing.userId)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -70,7 +70,7 @@ export class AddressController {
     try {
       const { userId } = req.params;
 
-      if (!this.isSelfOrAdmin(req, userId)) {
+      if (!isSelfOrAdmin(req, userId)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -87,7 +87,7 @@ export class AddressController {
       const { userId } = req.params;
       const { addressId } = req.params;
 
-      if (!this.isSelfOrAdmin(req, userId)) {
+      if (!isSelfOrAdmin(req, userId)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
