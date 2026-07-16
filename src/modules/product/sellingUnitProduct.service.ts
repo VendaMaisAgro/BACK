@@ -254,6 +254,13 @@ export class SellingUnitProductService {
       throw new Error(`Unidade de medida com ID ${id} não encontrada`);
     }
 
+    if (data.unit !== undefined && typeof data.unit !== 'string') {
+      throw new Error('unit deve ser uma string');
+    }
+    if (data.title !== undefined && typeof data.title !== 'string') {
+      throw new Error('title deve ser uma string');
+    }
+
     const unit = data.unit !== undefined ? data.unit.trim().toLowerCase() : undefined;
     const title = data.title !== undefined ? data.title.trim() : undefined;
 

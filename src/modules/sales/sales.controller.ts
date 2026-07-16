@@ -8,6 +8,34 @@ const s3Service = new UploadS3Service();
 
 type SaleAccess = { found: boolean; role: "admin" | "buyer" | "seller" | null };
 
+/**
+ * Campos de UpdateSaleDataDto que comprador/vendedor podem alterar via PUT /sales/:id.
+ * Tudo que envolve dinheiro, identidade da venda, máquina de estados ou conteúdo do
+ * pedido (buyerId, paymentCompleted, paymentMethodId, status, sellerApproved,
+ * boughtProducts, transportValue, cargoWeightKg etc.) já tem endpoint dedicado com
+ * suas próprias travas e não deve ser mutável por aqui — só admin tem acesso irrestrito.
+ */
+const PARTY_EDITABLE_SALE_FIELDS = [
+  "addressId",
+  "productRating",
+  "sellerRating",
+  "plannedHarvestDate",
+  "plannedPickupDate",
+  "plannedDeliveryDate",
+  "technicalSpec",
+  "certifierRequired",
+] as const;
+
+function sanitizeSaleUpdatePayload(role: "admin" | "buyer" | "seller", body: Record<string, unknown>) {
+  if (role === "admin") return body;
+
+  const sanitized: Record<string, unknown> = {};
+  for (const field of PARTY_EDITABLE_SALE_FIELDS) {
+    if (body[field] !== undefined) sanitized[field] = body[field];
+  }
+  return sanitized;
+}
+
 /** Verifica se o usuário autenticado é admin, o comprador ou um dos vendedores da venda. */
 async function getSaleAccess(req: Request, saleId: string): Promise<SaleAccess> {
   const parties = await service.getSaleParties(saleId);
@@ -159,7 +187,8 @@ export class SaleController {
         return;
       }
 
-      const result = await service.update(id, req.body as UpdateSaleDataDto);
+      const sanitizedBody = sanitizeSaleUpdatePayload(access.role, req.body ?? {});
+      const result = await service.update(id, sanitizedBody as UpdateSaleDataDto);
       res.json(result);
     } catch (error: any) {
       console.error(error);
@@ -215,7 +244,7 @@ export class SaleController {
         res.status(404).json({ message: "Sale not found" });
         return;
       }
-      if (!access.role) {
+      if (access.role !== "admin") {
         res.status(403).json({ message: "Forbidden" });
         return;
       }

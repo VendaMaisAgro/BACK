@@ -28,11 +28,10 @@ async function isPartyOrAdmin(req: Request, saleId: string): Promise<boolean> {
   const authUserId = req.user?.userId;
   if (!authUserId) return false;
 
-  const buyerId = await service.getBuyerIdForSale(saleId);
-  if (buyerId === authUserId) return true;
+  const parties = await service.getSaleParties(saleId);
+  if (!parties) return false;
 
-  const sellers = await service.getSellersForSale(saleId);
-  return sellers.includes(authUserId);
+  return parties.buyerId === authUserId || parties.sellerIds.includes(authUserId);
 }
 
 export class ContractController {
