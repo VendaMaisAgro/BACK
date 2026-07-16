@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'secret_key_teste';
+import { JWT_SECRET } from '../config/jwt.config';
 
 interface JwtPayload {
   id: string;
