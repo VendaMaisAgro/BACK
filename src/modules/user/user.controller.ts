@@ -5,13 +5,39 @@ import { UserService } from './user.service';
 const prisma = new PrismaClient();
 const service = new UserService(prisma);
 
+/**
+ * Mensagens de erro de validação/regra de negócio lançadas por UserService.create()
+ * e UserService.createAdmin() — qualquer outra exceção (ex.: banco indisponível) é
+ * uma falha interna e deve virar 500, não 400.
+ */
+const KNOWN_USER_VALIDATION_ERRORS = new Set([
+  'Campos obrigatórios faltando.',
+  'Perfil inválido.',
+  'CPF ou CNPJ é obrigatório.',
+  'CPF inválido.',
+  'CPF já cadastrado.',
+  'CNPJ inválido.',
+  'CNPJ já cadastrado.',
+  'Email já cadastrado.',
+  'A senha deve conter pelo menos 8 caracteres, incluindo uma letra maiúscula, uma letra minúscula, um número e um caractere especial.',
+]);
+
+function isKnownUserValidationError(message: string | undefined): boolean {
+  return !!message && KNOWN_USER_VALIDATION_ERRORS.has(message);
+}
+
 export class UserController {
   public async createHandler(req: Request, res: Response): Promise<void> {
     try {
       await service.create(req.body);
       res.status(201).json({ message: 'Usuário cadastrado com sucesso!' });
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      if (isKnownUserValidationError(error.message)) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao cadastrar usuário.' });
     }
   }
 
@@ -20,7 +46,12 @@ export class UserController {
       const admin = await service.createAdmin(req.body);
       res.status(201).json({ message: 'Usuário admin criado com sucesso!', user: admin });
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      if (isKnownUserValidationError(error.message)) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao criar usuário admin.' });
     }
   };
 
