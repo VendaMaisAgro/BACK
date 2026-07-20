@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { CreateSaleDataDto, SellerDecisionDto, UpdateSaleDataDto } from "./dto/create-sales.dto";
 import { addBusinessDays, isWithinBusinessDays, lessThanHoursRemaining } from "../../lib/businessDays";
+import { calculatePipelineStage, PipelineStageResult } from "../../lib/pipelineStage";
 
 export class SaleService {
   private readonly prisma: PrismaClient;
@@ -845,6 +846,31 @@ export class SaleService {
       },
       include: { boughtProducts: true },
     });
+  }
+
+  /**
+   * Calcula a etapa atual do pipeline de uma venda e há quantos dias ela está nessa etapa.
+   * Ver src/lib/pipelineStage.ts para a lógica de inferência a partir dos campos existentes.
+   */
+  async getPipelineStage(saleId: string): Promise<PipelineStageResult> {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: saleId },
+      select: {
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        downPaymentCompleted: true,
+        paymentCompleted: true,
+        shippedAt: true,
+        arrivedAt: true,
+        actualDeliveryDate: true,
+        weightDocumentId: true,
+        Payment: { select: { phase: true, status: true, updatedAt: true } },
+      },
+    });
+    if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+
+    return calculatePipelineStage(sale);
   }
 
   /**

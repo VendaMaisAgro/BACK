@@ -1,5 +1,10 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(npx prisma *)",
+      "Bash(npm run *)",
+      "Bash(node -e \"try{require.resolve\\('pg'\\); console.log\\('pg disponível'\\)}catch\\(e\\){console.log\\('pg NÃO instalado'\\)}\")"
+    ],
     "deny": [
       "Read(.env)",
       "Read(.env.*)",
