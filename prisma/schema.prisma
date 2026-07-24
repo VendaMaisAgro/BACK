@@ -168,6 +168,7 @@ model SaleData {
   productRating    Float?    @default(0.0)
   sellerRating     Float?    @default(0.0)
   status           String    @default("Pedido realizado!")
+  statusChangedAt  DateTime? @map("status_changed_at")
   addressId        String?
   paymentMethodId  String
   buyerId          String

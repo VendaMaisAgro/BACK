@@ -34,7 +34,8 @@ interface SalePaymentForPipeline {
 export interface SaleForPipeline {
   status: string;
   createdAt: Date | null;
-  updatedAt: Date;
+  /** Preenchido manualmente em todo ponto que muda `status` (ver sales.service.ts/payment.service.ts). */
+  statusChangedAt: Date | null;
   downPaymentCompleted: boolean;
   paymentCompleted: boolean;
   shippedAt: Date | null;
@@ -58,17 +59,21 @@ function daysBetween(from: Date, now: Date): number {
  * Calcula a etapa atual do pipeline de uma venda e há quantos dias ela está nessa etapa.
  * Usa apenas campos já existentes em SaleData (sem tabela nova): a etapa é inferida a partir
  * dos campos duráveis que permanecem verdadeiros/preenchidos uma vez atingidos (downPaymentCompleted,
- * shippedAt, arrivedAt, weightDocumentId, actualDeliveryDate, paymentCompleted). Como SaleData.status
- * guarda só o valor atual (sem histórico), as etapas 2, 3, 5 e 8 usam `updatedAt` como proxy para o
- * momento de entrada na etapa — preciso na prática porque cada transição de negócio (authorizeHarvest,
- * registerManualWeight, applyPaymentCompletion, etc.) é o único update daquele registro naquele instante.
+ * shippedAt, arrivedAt, weightDocumentId, actualDeliveryDate, paymentCompleted). Para as etapas
+ * derivadas de `status` (2 no fallback, 3, 5, 8, e os terminais), usamos `statusChangedAt` — um campo
+ * preenchido manualmente em todo ponto que muda `status` — em vez de `updatedAt`: `updatedAt` é
+ * @updatedAt do Prisma e muda em QUALQUER update da venda (recalculo de frete, troca de método de
+ * pagamento, avaliação, reagendamento de data planejada), o que resetaria "dias na etapa" sem a
+ * etapa ter mudado de fato.
  */
 export function calculatePipelineStage(sale: SaleForPipeline, now: Date = new Date()): PipelineStageResult {
+  const statusEnteredAt = sale.statusChangedAt ?? sale.createdAt ?? now;
+
   if (sale.status === "Cancelado") {
-    return { stage: 0, key: "cancelado", label: "Cancelado", enteredAt: sale.updatedAt, daysInStage: daysBetween(sale.updatedAt, now) };
+    return { stage: 0, key: "cancelado", label: "Cancelado", enteredAt: statusEnteredAt, daysInStage: daysBetween(statusEnteredAt, now) };
   }
   if (sale.status === "Recusado pelo vendedor") {
-    return { stage: 0, key: "recusado_vendedor", label: "Recusado pelo vendedor", enteredAt: sale.updatedAt, daysInStage: daysBetween(sale.updatedAt, now) };
+    return { stage: 0, key: "recusado_vendedor", label: "Recusado pelo vendedor", enteredAt: statusEnteredAt, daysInStage: daysBetween(statusEnteredAt, now) };
   }
 
   const isAccepted = sale.status === "Concluído" || sale.status === "Concluída";
@@ -80,28 +85,28 @@ export function calculatePipelineStage(sale: SaleForPipeline, now: Date = new Da
   let result: { stage: number; enteredAt: Date };
 
   if (sale.paymentCompleted && isAccepted) {
-    const enteredAt = latestCompletedPaymentAt(sale.Payment, ["final_payment", "full"]) ?? sale.updatedAt;
+    const enteredAt = latestCompletedPaymentAt(sale.Payment, ["final_payment", "full"]) ?? statusEnteredAt;
     result = { stage: 10, enteredAt };
   } else if (sale.paymentCompleted) {
-    const enteredAt = latestCompletedPaymentAt(sale.Payment, ["final_payment", "full"]) ?? sale.updatedAt;
+    const enteredAt = latestCompletedPaymentAt(sale.Payment, ["final_payment", "full"]) ?? statusEnteredAt;
     result = { stage: 9, enteredAt };
   } else if (isAccepted) {
-    result = { stage: 8, enteredAt: sale.updatedAt };
+    result = { stage: 8, enteredAt: statusEnteredAt };
   } else if (isDelivered) {
-    result = { stage: 7, enteredAt: sale.actualDeliveryDate ?? sale.updatedAt };
+    result = { stage: 7, enteredAt: sale.actualDeliveryDate ?? statusEnteredAt };
   } else if (hasArrived) {
     result = { stage: 6, enteredAt: sale.arrivedAt as Date };
   } else if (hasWeightDoc) {
-    result = { stage: 5, enteredAt: sale.updatedAt };
+    result = { stage: 5, enteredAt: statusEnteredAt };
   } else if (hasShipped) {
     result = { stage: 4, enteredAt: sale.shippedAt as Date };
   } else if (sale.status === "Colheita autorizada") {
-    result = { stage: 3, enteredAt: sale.updatedAt };
+    result = { stage: 3, enteredAt: statusEnteredAt };
   } else if (sale.downPaymentCompleted) {
-    const enteredAt = latestCompletedPaymentAt(sale.Payment, ["down_payment", "full"]) ?? sale.updatedAt;
+    const enteredAt = latestCompletedPaymentAt(sale.Payment, ["down_payment", "full"]) ?? statusEnteredAt;
     result = { stage: 2, enteredAt };
   } else {
-    result = { stage: 1, enteredAt: sale.createdAt ?? sale.updatedAt };
+    result = { stage: 1, enteredAt: sale.createdAt ?? statusEnteredAt };
   }
 
   const stageInfo = PIPELINE_STAGES[result.stage - 1];

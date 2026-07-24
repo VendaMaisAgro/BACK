@@ -215,14 +215,14 @@ export class DashboardService {
       select: {
         status: true,
         createdAt: true,
-        updatedAt: true,
+        statusChangedAt: true,
         downPaymentCompleted: true,
         paymentCompleted: true,
         shippedAt: true,
         arrivedAt: true,
         actualDeliveryDate: true,
         weightDocumentId: true,
-        Payment: { select: { phase: true, status: true, updatedAt: true } },
+        Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
       },
     });
 
@@ -274,7 +274,7 @@ export class DashboardService {
           orderNumber: true,
           status: true,
           createdAt: true,
-          updatedAt: true,
+          statusChangedAt: true,
           downPaymentCompleted: true,
           paymentCompleted: true,
           shippedAt: true,
@@ -289,7 +289,7 @@ export class DashboardService {
               product: { select: { name: true, seller: { select: { name: true } } } },
             },
           },
-          Payment: { select: { phase: true, status: true, updatedAt: true } },
+          Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
         },
       }),
     ]);

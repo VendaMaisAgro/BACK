@@ -520,25 +520,26 @@ export class PaymentService {
         });
 
         if (newStatus === 'completed') {
+            const statusChangedAt = new Date();
             if (paymentRecord.phase === 'down_payment') {
                 console.info(`[applyPaymentCompletion] Entrada confirmada para venda ${paymentRecord.saleId}`);
                 await tx.saleData.update({
                     where: { id: paymentRecord.saleId },
-                    data: { downPaymentCompleted: true, status: 'Entrada confirmada' },
+                    data: { downPaymentCompleted: true, status: 'Entrada confirmada', statusChangedAt },
                 });
             } else if (paymentRecord.phase === 'full') {
                 // Pagamento único: quita entrada e total ao mesmo tempo
                 console.info(`[applyPaymentCompletion] Pagamento único (full) confirmado para venda ${paymentRecord.saleId}`);
                 await tx.saleData.update({
                     where: { id: paymentRecord.saleId },
-                    data: { downPaymentCompleted: true, paymentCompleted: true, status: 'Concluído' },
+                    data: { downPaymentCompleted: true, paymentCompleted: true, status: 'Concluído', statusChangedAt },
                 });
             } else {
                 // final_payment
                 console.info(`[applyPaymentCompletion] Pagamento final confirmado para venda ${paymentRecord.saleId}`);
                 await tx.saleData.update({
                     where: { id: paymentRecord.saleId },
-                    data: { paymentCompleted: true, status: 'Concluído' },
+                    data: { paymentCompleted: true, status: 'Concluído', statusChangedAt },
                 });
             }
         }

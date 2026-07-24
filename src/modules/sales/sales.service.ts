@@ -80,6 +80,7 @@ export class SaleService {
           productRating: data.productRating ?? 0,
           sellerRating: data.sellerRating ?? 0,
           status: data.status ?? "Pedido realizado!",
+          statusChangedAt: new Date(),
           sellerApproved: data.sellerApproved ?? null,
           addressId: data.addressId ?? null,
           paymentMethodId: data.paymentMethodId,
@@ -417,7 +418,7 @@ export class SaleService {
       ...(data.productRating !== undefined && { productRating: data.productRating }),
       ...(data.sellerRating !== undefined && { sellerRating: data.sellerRating }),
       ...(data.sellerApproved !== undefined && { sellerApproved: data.sellerApproved }),
-      ...(data.status !== undefined && { status: data.status }),
+      ...(data.status !== undefined && { status: data.status, statusChangedAt: new Date() }),
       ...(data.addressId !== undefined && { addressId: data.addressId }),
       ...(data.paymentMethodId !== undefined && { paymentMethodId: data.paymentMethodId }),
       ...(data.paymentCompleted !== undefined && { paymentCompleted: data.paymentCompleted }),
@@ -436,8 +437,14 @@ export class SaleService {
     };
 
     // Sincronizar status quando sellerApproved vier no update
-    if (data.sellerApproved === true) updateData.status = "Aprovado pelo vendedor";
-    if (data.sellerApproved === false) updateData.status = "Recusado pelo vendedor";
+    if (data.sellerApproved === true) {
+      updateData.status = "Aprovado pelo vendedor";
+      updateData.statusChangedAt = new Date();
+    }
+    if (data.sellerApproved === false) {
+      updateData.status = "Recusado pelo vendedor";
+      updateData.statusChangedAt = new Date();
+    }
 
     if (data.boughtProducts) {
       const boughtProductsWithCalculatedValue = await Promise.all(
@@ -540,7 +547,7 @@ export class SaleService {
 
     return this.prisma.saleData.update({
       where: { id: saleId },
-      data: { sellerApproved: dto.approved, status: newStatus, ...dateFields },
+      data: { sellerApproved: dto.approved, status: newStatus, statusChangedAt: new Date(), ...dateFields },
       include: { boughtProducts: true },
     });
   }
@@ -581,7 +588,7 @@ export class SaleService {
         if (afterDeliveryDate) {
           await tx.saleData.update({
             where: { id: params.saleId },
-            data: { actualDeliveryDate: now, status: 'Entregue' },
+            data: { actualDeliveryDate: now, status: 'Entregue', statusChangedAt: now },
           });
         }
       }
@@ -624,6 +631,7 @@ export class SaleService {
       data: {
         actualDeliveryDate: tacitDeadline,
         status: 'Concluído',
+        statusChangedAt: tacitDeadline,
       },
     });
 
@@ -646,7 +654,7 @@ export class SaleService {
 
     return this.prisma.saleData.update({
       where: { id: saleId },
-      data: { status: 'Colheita autorizada' },
+      data: { status: 'Colheita autorizada', statusChangedAt: new Date() },
       include: { boughtProducts: true },
     });
   }
@@ -738,6 +746,7 @@ export class SaleService {
           cargoWeightKg: params.weightKg,
           weightDocumentId: doc.id,
           status: 'Aguardando pagamento final',
+          statusChangedAt: new Date(),
           ...(adjustedContractTotal !== null && { adjustedContractTotal }),
         },
         include: { boughtProducts: true },
@@ -843,6 +852,7 @@ export class SaleService {
         penaltyAmount: params.penaltyAmount ?? null,
         penaltyReason: params.reason,
         status: 'Cancelado',
+        statusChangedAt: new Date(),
       },
       include: { boughtProducts: true },
     });
@@ -858,14 +868,14 @@ export class SaleService {
       select: {
         status: true,
         createdAt: true,
-        updatedAt: true,
+        statusChangedAt: true,
         downPaymentCompleted: true,
         paymentCompleted: true,
         shippedAt: true,
         arrivedAt: true,
         actualDeliveryDate: true,
         weightDocumentId: true,
-        Payment: { select: { phase: true, status: true, updatedAt: true } },
+        Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
       },
     });
     if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
