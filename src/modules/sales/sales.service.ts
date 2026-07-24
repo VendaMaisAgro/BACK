@@ -80,7 +80,7 @@ export class SaleService {
           productRating: data.productRating ?? 0,
           sellerRating: data.sellerRating ?? 0,
           status: data.status ?? "Pedido realizado!",
-          statusChangedAt: new Date(),
+          statusChangedAt: data.createdAt ?? new Date(),
           sellerApproved: data.sellerApproved ?? null,
           addressId: data.addressId ?? null,
           paymentMethodId: data.paymentMethodId,
