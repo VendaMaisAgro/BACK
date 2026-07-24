@@ -14,10 +14,17 @@ export class DashboardController {
     }
   };
 
-  public getPipelineOverview: RequestHandler = async (_req: Request, res: Response): Promise<void> => {
+  public getPipelineOverview: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
-      const result = await service.getPipelineOverview();
-      res.status(200).json(result);
+      const page = req.query.page ? parseInt(req.query.page as string, 10) : undefined;
+      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : undefined;
+
+      const [summary, list] = await Promise.all([
+        service.getPipelineSummary(),
+        service.getPipelineList({ page, pageSize }),
+      ]);
+
+      res.status(200).json({ ...summary, list });
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Failed to load pipeline overview" });

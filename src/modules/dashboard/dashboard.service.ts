@@ -90,12 +90,22 @@ export interface PipelineListItem {
   diasEtapa: number;
 }
 
-export interface PipelineOverview {
+export interface PipelineSummary {
   statusCounts: PipelineStatusCount[];
   terminal: PipelineStatusCount[];
   funnel: PipelineFunnelBucket[];
-  list: PipelineListItem[];
 }
+
+export interface PipelineListPage {
+  items: PipelineListItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
 
 export class DashboardService {
   private readonly prisma: PrismaClient;
@@ -196,16 +206,13 @@ export class DashboardService {
   }
 
   /**
-   * Pipeline das Operações: contagem por uma das 10 etapas (+ terminais Cancelado/Recusado),
-   * funil cumulativo em 5 baldes e lista detalhada com status e dias na etapa atual.
-   * Reaproveita calculatePipelineStage (item 2) e os campos Payment.status/phase existentes.
+   * Status por etapa (10 etapas + terminais Cancelado/Recusado) e funil cumulativo em 5 baldes.
+   * Faz um único scan leve (sem boughtProducts/Payment.amount) sobre todas as vendas — precisa
+   * ler todas porque a etapa é derivada em código (calculatePipelineStage), não uma coluna do banco.
    */
-  async getPipelineOverview(now: Date = new Date()): Promise<PipelineOverview> {
+  async getPipelineSummary(now: Date = new Date()): Promise<PipelineSummary> {
     const sales = await this.prisma.saleData.findMany({
-      orderBy: { orderNumber: "desc" },
       select: {
-        id: true,
-        orderNumber: true,
         status: true,
         createdAt: true,
         updatedAt: true,
@@ -215,14 +222,6 @@ export class DashboardService {
         arrivedAt: true,
         actualDeliveryDate: true,
         weightDocumentId: true,
-        transportValue: true,
-        adjustedContractTotal: true,
-        boughtProducts: {
-          select: {
-            value: true,
-            product: { select: { name: true, seller: { select: { name: true } } } },
-          },
-        },
         Payment: { select: { phase: true, status: true, updatedAt: true } },
       },
     });
@@ -233,7 +232,6 @@ export class DashboardService {
       { stage: 0, key: "recusado_vendedor", label: "Recusado pelo vendedor", count: 0 },
     ];
     const funnel: PipelineFunnelBucket[] = FUNNEL_BUCKETS.map(({ key, label }) => ({ key, label, count: 0 }));
-    const list: PipelineListItem[] = [];
 
     for (const sale of sales) {
       const stageResult = calculatePipelineStage(sale, now);
@@ -241,17 +239,63 @@ export class DashboardService {
       if (stageResult.stage === 0) {
         const bucket = terminal.find((t) => t.key === stageResult.key);
         if (bucket) bucket.count += 1;
-      } else {
-        const bucket = statusCounts.find((s) => s.stage === stageResult.stage);
-        if (bucket) bucket.count += 1;
-        for (const funnelBucket of FUNNEL_BUCKETS) {
-          if (stageResult.stage >= funnelBucket.minStage) {
-            const target = funnel.find((f) => f.key === funnelBucket.key)!;
-            target.count += 1;
-          }
-        }
+        continue;
       }
 
+      const bucket = statusCounts.find((s) => s.stage === stageResult.stage);
+      if (bucket) bucket.count += 1;
+      for (const funnelBucket of FUNNEL_BUCKETS) {
+        if (stageResult.stage >= funnelBucket.minStage) {
+          const target = funnel.find((f) => f.key === funnelBucket.key)!;
+          target.count += 1;
+        }
+      }
+    }
+
+    return { statusCounts, terminal, funnel };
+  }
+
+  /**
+   * Lista detalhada paginada (produto/vendedor/valor/status/dias na etapa), 1 linha por venda.
+   * Só essa consulta carrega boughtProducts/product/seller, e só para a página pedida.
+   */
+  async getPipelineList(params: { page?: number; pageSize?: number } = {}, now: Date = new Date()): Promise<PipelineListPage> {
+    const page = Math.max(1, params.page ?? 1);
+    const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
+
+    const [total, sales] = await Promise.all([
+      this.prisma.saleData.count(),
+      this.prisma.saleData.findMany({
+        orderBy: { orderNumber: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          orderNumber: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          downPaymentCompleted: true,
+          paymentCompleted: true,
+          shippedAt: true,
+          arrivedAt: true,
+          actualDeliveryDate: true,
+          weightDocumentId: true,
+          transportValue: true,
+          adjustedContractTotal: true,
+          boughtProducts: {
+            select: {
+              value: true,
+              product: { select: { name: true, seller: { select: { name: true } } } },
+            },
+          },
+          Payment: { select: { phase: true, status: true, updatedAt: true } },
+        },
+      }),
+    ]);
+
+    const items: PipelineListItem[] = sales.map((sale) => {
+      const stageResult = calculatePipelineStage(sale, now);
       const products = sale.boughtProducts;
       const produto = products.length === 0
         ? "-"
@@ -261,7 +305,7 @@ export class DashboardService {
       const sellerNames = [...new Set(products.map((bp) => bp.product.seller.name))];
       const vendedor = sellerNames.length === 0 ? "-" : sellerNames.length === 1 ? sellerNames[0] : "Múltiplos vendedores";
 
-      list.push({
+      return {
         id: sale.id,
         orderNumber: sale.orderNumber,
         produto,
@@ -269,9 +313,9 @@ export class DashboardService {
         valor: round2(contractTotalOf(sale)),
         status: stageResult.label,
         diasEtapa: stageResult.daysInStage,
-      });
-    }
+      };
+    });
 
-    return { statusCounts, terminal, funnel, list };
+    return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
 }

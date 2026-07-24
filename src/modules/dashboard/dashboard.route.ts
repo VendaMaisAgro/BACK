@@ -81,7 +81,17 @@ router.get("/executive-overview", controller.getExecutiveOverview as RequestHand
  *       funnel: 5 baldes cumulativos (Cadastro, Pagamento, Colheita, Em Trânsito, Entrega) — cada balde conta
  *       vendas que já alcançaram ao menos aquela etapa; vendas Canceladas/Recusadas ficam fora do funil.
  *       list: 1 linha por venda (produto/vendedor resumidos quando há múltiplos itens), com status e dias na etapa atual.
+ *       Paginada — statusCounts/terminal/funnel sempre consideram todas as vendas, list retorna só a página pedida.
  *     tags: [Dashboard]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1, minimum: 1 }
+ *         description: Página da lista detalhada (1-indexed)
+ *       - in: query
+ *         name: pageSize
+ *         schema: { type: integer, default: 20, maximum: 100 }
+ *         description: Itens por página da lista detalhada (máx. 100)
  *     responses:
  *       200:
  *         description: Dados agregados do pipeline
@@ -116,17 +126,24 @@ router.get("/executive-overview", controller.getExecutiveOverview as RequestHand
  *                       label: { type: string, example: "Em Trânsito" }
  *                       count: { type: integer, example: 50 }
  *                 list:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id: { type: string, format: uuid }
- *                       orderNumber: { type: integer, example: 102 }
- *                       produto: { type: string, example: "Manga (+2)" }
- *                       vendedor: { type: string, example: "Coop X" }
- *                       valor: { type: number, example: 50000.0 }
- *                       status: { type: string, example: "Em trânsito" }
- *                       diasEtapa: { type: integer, example: 2 }
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id: { type: string, format: uuid }
+ *                           orderNumber: { type: integer, example: 102 }
+ *                           produto: { type: string, example: "Manga (+2)" }
+ *                           vendedor: { type: string, example: "Coop X" }
+ *                           valor: { type: number, example: 50000.0 }
+ *                           status: { type: string, example: "Em trânsito" }
+ *                           diasEtapa: { type: integer, example: 2 }
+ *                     page: { type: integer, example: 1 }
+ *                     pageSize: { type: integer, example: 20 }
+ *                     total: { type: integer, example: 137 }
+ *                     totalPages: { type: integer, example: 7 }
  *       401: { description: Não autenticado }
  *       403: { description: Acesso restrito a administradores }
  */
