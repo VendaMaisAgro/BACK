@@ -114,6 +114,7 @@ router.get("/executive-overview", controller.getExecutiveOverview as RequestHand
  *                   items:
  *                     type: object
  *                     properties:
+ *                       stage: { type: integer, example: 0, description: "Sempre 0 — fora da esteira numerada 1-10" }
  *                       key: { type: string, example: "cancelado" }
  *                       label: { type: string, example: "Cancelado" }
  *                       count: { type: integer, example: 2 }
@@ -144,6 +145,7 @@ router.get("/executive-overview", controller.getExecutiveOverview as RequestHand
  *                     pageSize: { type: integer, example: 20 }
  *                     total: { type: integer, example: 137 }
  *                     totalPages: { type: integer, example: 7 }
+ *       400: { description: "page ou pageSize inválidos (precisam ser inteiros positivos)" }
  *       401: { description: Não autenticado }
  *       403: { description: Acesso restrito a administradores }
  */

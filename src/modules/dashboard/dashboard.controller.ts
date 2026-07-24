@@ -3,6 +3,13 @@ import { DashboardService } from "./dashboard.service";
 
 const service = new DashboardService();
 
+/** Retorna undefined se ausente, o inteiro positivo se válido, ou "invalid" se presente e malformado. */
+function parsePositiveIntParam(raw: unknown): number | undefined | "invalid" {
+  if (raw === undefined) return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : "invalid";
+}
+
 export class DashboardController {
   public getExecutiveOverview: RequestHandler = async (_req: Request, res: Response): Promise<void> => {
     try {
@@ -16,12 +23,17 @@ export class DashboardController {
 
   public getPipelineOverview: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
-      const page = req.query.page ? parseInt(req.query.page as string, 10) : undefined;
-      const pageSize = req.query.pageSize ? parseInt(req.query.pageSize as string, 10) : undefined;
+      const page = parsePositiveIntParam(req.query.page);
+      const pageSize = parsePositiveIntParam(req.query.pageSize);
+      if (page === "invalid" || pageSize === "invalid") {
+        res.status(400).json({ error: "page e pageSize devem ser números inteiros positivos" });
+        return;
+      }
 
+      const now = new Date();
       const [summary, list] = await Promise.all([
-        service.getPipelineSummary(),
-        service.getPipelineList({ page, pageSize }),
+        service.getPipelineSummary(now),
+        service.getPipelineList({ page, pageSize }, now),
       ]);
 
       res.status(200).json({ ...summary, list });
