@@ -20,6 +20,8 @@ router.use(requireAdmin as RequestHandler);
  *       Previsto agrupa pelo mês de plannedDeliveryDate; Realizado agrupa pelo mês de actualDeliveryDate
  *       (Faturamento/Operações) ou pelo mês de confirmação do pagamento (Receita).
  *     tags: [Dashboard]
+ *     security:
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Dados agregados dos últimos 12 meses
