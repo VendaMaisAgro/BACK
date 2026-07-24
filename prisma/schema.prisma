@@ -161,12 +161,14 @@ model SaleData {
   orderNumber      Int       @default(autoincrement()) @unique @map("order_number")
   transportTypeId  String
   createdAt        DateTime? @default(now())
+  updatedAt        DateTime  @updatedAt
   shippedAt        DateTime?
   arrivedAt        DateTime?
   transportValue   Float
   productRating    Float?    @default(0.0)
   sellerRating     Float?    @default(0.0)
   status           String    @default("Pedido realizado!")
+  statusChangedAt  DateTime? @map("status_changed_at")
   addressId        String?
   paymentMethodId  String
   buyerId          String
