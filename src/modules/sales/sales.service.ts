@@ -408,6 +408,13 @@ export class SaleService {
       }
     }
 
+    // statusChangedAt só deve mudar quando o status efetivamente muda (evita resetar "dias na
+    // etapa" em updates que reenviam o mesmo status já vigente).
+    const needsStatusCheck = data.status !== undefined || data.sellerApproved !== undefined;
+    const currentStatus = needsStatusCheck
+      ? (await this.prisma.saleData.findUnique({ where: { id }, select: { status: true } }))?.status
+      : undefined;
+
     const updateData: any = {
       ...(data.transportTypeId !== undefined && { transportTypeId: data.transportTypeId }),
       ...(data.createdAt && { createdAt: data.createdAt }),
@@ -418,7 +425,7 @@ export class SaleService {
       ...(data.productRating !== undefined && { productRating: data.productRating }),
       ...(data.sellerRating !== undefined && { sellerRating: data.sellerRating }),
       ...(data.sellerApproved !== undefined && { sellerApproved: data.sellerApproved }),
-      ...(data.status !== undefined && { status: data.status, statusChangedAt: new Date() }),
+      ...(data.status !== undefined && { status: data.status }),
       ...(data.addressId !== undefined && { addressId: data.addressId }),
       ...(data.paymentMethodId !== undefined && { paymentMethodId: data.paymentMethodId }),
       ...(data.paymentCompleted !== undefined && { paymentCompleted: data.paymentCompleted }),
@@ -437,12 +444,10 @@ export class SaleService {
     };
 
     // Sincronizar status quando sellerApproved vier no update
-    if (data.sellerApproved === true) {
-      updateData.status = "Aprovado pelo vendedor";
-      updateData.statusChangedAt = new Date();
-    }
-    if (data.sellerApproved === false) {
-      updateData.status = "Recusado pelo vendedor";
+    if (data.sellerApproved === true) updateData.status = "Aprovado pelo vendedor";
+    if (data.sellerApproved === false) updateData.status = "Recusado pelo vendedor";
+
+    if (needsStatusCheck && updateData.status !== undefined && updateData.status !== currentStatus) {
       updateData.statusChangedAt = new Date();
     }
 
