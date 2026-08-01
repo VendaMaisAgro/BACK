@@ -51,6 +51,19 @@ function round2(value: number): number {
   return parseFloat(value.toFixed(2));
 }
 
+function round1(value: number): number {
+  return parseFloat(value.toFixed(1));
+}
+
+function diffInDays(from: Date, to: Date): number {
+  return (to.getTime() - from.getTime()) / 86_400_000;
+}
+
+function average(values: number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
 function contractTotalOf(sale: {
   transportValue: number;
   adjustedContractTotal: number | null;
@@ -104,8 +117,92 @@ export interface PipelineListPage {
   totalPages: number;
 }
 
+export interface PipelineDateFilter {
+  startDate?: Date;
+  endDate?: Date;
+}
+
+function buildCreatedAtWhere(filter: PipelineDateFilter): Record<string, unknown> {
+  if (!filter.startDate && !filter.endDate) return {};
+  return {
+    createdAt: {
+      ...(filter.startDate && { gte: filter.startDate }),
+      ...(filter.endDate && { lte: filter.endDate }),
+    },
+  };
+}
+
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
+
+/** Prazo padrão (dias) considerado para um pagamento pendente "vencer" — mesmo default usado ao gerar boleto (expirationDays). */
+const PENDING_PAYMENT_OVERDUE_DAYS = 3;
+const DEFAULT_ALERT_LIST_LIMIT = 50;
+const MAX_ALERT_LIST_LIMIT = 200;
+const ACTIVE_SALE_STATUS_FILTER = { notIn: ["Cancelado", "Recusado pelo vendedor"] };
+
+const ALERT_TYPES = {
+  semPagamentoAntesColheita: {
+    problema: "Sem pagamento antes da colheita",
+    responsavel: "Comprador",
+    acao: "Cobrar pagamento da entrada",
+  },
+  semUploadDocumentos: {
+    problema: "Sem upload de documentos (NF) após embarque",
+    responsavel: "Vendedor",
+    acao: "Cobrar upload da nota fiscal",
+  },
+  entregaAtrasada: {
+    problema: "Entrega atrasada",
+    responsavel: "Vendedor",
+    acao: "Verificar status da entrega",
+  },
+  pagamentoVencido: {
+    problema: "Pagamento vencido",
+    responsavel: "Comprador",
+    acao: "Cobrar pagamento pendente",
+  },
+} as const;
+
+export interface OperationalAlertCounts {
+  semPagamentoAntesColheita: number;
+  semUploadDocumentos: number;
+  entregaAtrasada: number;
+  pagamentoVencido: number;
+}
+
+export interface OperationalAlertItem {
+  id: string;
+  orderNumber: number;
+  problema: string;
+  responsavel: string;
+  acao: string;
+}
+
+export interface OperationalAlertsOverview {
+  counts: OperationalAlertCounts;
+  list: { items: OperationalAlertItem[]; total: number; limit: number };
+}
+
+/** Abaixo desse percentual de entregas no prazo, comprador/vendedor entra com alerta:true. */
+const ON_TIME_ALERT_THRESHOLD_PERCENT = 80;
+
+export interface LogisticsPartyPerformance {
+  id: string;
+  name: string;
+  delivered: number;
+  onTimePercent: number;
+  alerta: boolean;
+}
+
+export interface LogisticsOverview {
+  deliveredCount: number;
+  averageDeliveryDays: number | null;
+  onTimePercent: number | null;
+  averageDelayDays: number | null;
+  byBuyer: LogisticsPartyPerformance[];
+  bySeller: LogisticsPartyPerformance[];
+}
 
 export class DashboardService {
   private readonly prisma: PrismaClient;
@@ -207,11 +304,12 @@ export class DashboardService {
 
   /**
    * Status por etapa (10 etapas + terminais Cancelado/Recusado) e funil cumulativo em 5 baldes.
-   * Faz um único scan leve (sem boughtProducts/Payment.amount) sobre todas as vendas — precisa
-   * ler todas porque a etapa é derivada em código (calculatePipelineStage), não uma coluna do banco.
+   * Faz um único scan leve (sem boughtProducts/Payment.amount) sobre as vendas do período filtrado —
+   * precisa ler todas porque a etapa é derivada em código (calculatePipelineStage), não uma coluna do banco.
    */
-  async getPipelineSummary(now: Date = new Date()): Promise<PipelineSummary> {
+  async getPipelineSummary(filter: PipelineDateFilter = {}, now: Date = new Date()): Promise<PipelineSummary> {
     const sales = await this.prisma.saleData.findMany({
+      where: buildCreatedAtWhere(filter),
       select: {
         status: true,
         createdAt: true,
@@ -258,20 +356,52 @@ export class DashboardService {
   /**
    * Lista detalhada paginada (produto/vendedor/valor/status/dias na etapa), 1 linha por venda.
    * Só essa consulta carrega boughtProducts/product/seller, e só para a página pedida.
+   * Filtro de etapa (stage) exige duas fases, porque a etapa é derivada em código, não uma coluna:
+   * 1) scan leve (mesmos campos do summary) para achar os IDs que batem com data+etapa;
+   * 2) busca pesada (boughtProducts/product/seller) só dos IDs da página pedida.
+   * Sem filtro de etapa, a paginação continua direta no banco (take/skip), sem esse scan extra.
    */
-  async getPipelineList(params: { page?: number; pageSize?: number } = {}, now: Date = new Date()): Promise<PipelineListPage> {
+  async getPipelineList(
+    params: { page?: number; pageSize?: number; stage?: number[] } & PipelineDateFilter = {},
+    now: Date = new Date()
+  ): Promise<PipelineListPage> {
     const page = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
+    const createdAtWhere = buildCreatedAtWhere(params);
 
-    const [total, sales] = await Promise.all([
-      this.prisma.saleData.count(),
-      this.prisma.saleData.findMany({
+    const heavySelect = {
+      id: true,
+      orderNumber: true,
+      status: true,
+      createdAt: true,
+      statusChangedAt: true,
+      downPaymentCompleted: true,
+      paymentCompleted: true,
+      shippedAt: true,
+      arrivedAt: true,
+      actualDeliveryDate: true,
+      weightDocumentId: true,
+      transportValue: true,
+      adjustedContractTotal: true,
+      boughtProducts: {
+        select: {
+          value: true,
+          product: { select: { name: true, seller: { select: { name: true } } } },
+        },
+      },
+      Payment: { where: { status: "completed" as const }, select: { phase: true, status: true, updatedAt: true } },
+    } as const;
+
+    let total: number;
+    let sales: Awaited<ReturnType<typeof this.prisma.saleData.findMany<{ select: typeof heavySelect }>>>;
+
+    if (params.stage && params.stage.length > 0) {
+      const stageSet = new Set(params.stage);
+      const lightRows = await this.prisma.saleData.findMany({
+        where: createdAtWhere,
         orderBy: { orderNumber: "desc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
         select: {
           id: true,
-          orderNumber: true,
           status: true,
           createdAt: true,
           statusChangedAt: true,
@@ -281,18 +411,32 @@ export class DashboardService {
           arrivedAt: true,
           actualDeliveryDate: true,
           weightDocumentId: true,
-          transportValue: true,
-          adjustedContractTotal: true,
-          boughtProducts: {
-            select: {
-              value: true,
-              product: { select: { name: true, seller: { select: { name: true } } } },
-            },
-          },
           Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
         },
-      }),
-    ]);
+      });
+
+      const matchingIds = lightRows
+        .filter((row) => stageSet.has(calculatePipelineStage(row, now).stage))
+        .map((row) => row.id);
+
+      total = matchingIds.length;
+      const pageIds = matchingIds.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
+
+      const heavyRows = await this.prisma.saleData.findMany({ where: { id: { in: pageIds } }, select: heavySelect });
+      const byId = new Map(heavyRows.map((row) => [row.id, row]));
+      sales = pageIds.map((id) => byId.get(id)!);
+    } else {
+      [total, sales] = await Promise.all([
+        this.prisma.saleData.count({ where: createdAtWhere }),
+        this.prisma.saleData.findMany({
+          where: createdAtWhere,
+          orderBy: { orderNumber: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: heavySelect,
+        }),
+      ]);
+    }
 
     const items: PipelineListItem[] = sales.map((sale) => {
       const stageResult = calculatePipelineStage(sale, now);
@@ -317,5 +461,156 @@ export class DashboardService {
     });
 
     return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  /**
+   * Alertas Operacionais (4 regras, reaproveitando campos/relações já existentes em SaleData):
+   * - Sem pagamento antes da colheita: plannedHarvestDate já chegou e a entrada ainda não foi confirmada
+   *   (mesma condição que bloqueia authorizeHarvest).
+   * - Sem upload de documentos após embarque: shippedAt preenchido mas nenhum OperationDocument nota_fiscal.
+   * - Entrega atrasada: plannedDeliveryDate no passado sem actualDeliveryDate (mesmos candidatos do aceite tácito).
+   * - Pagamento vencido: existe Payment pending com mais de PENDING_PAYMENT_OVERDUE_DAYS dias.
+   * Vendas Canceladas/Recusadas ficam fora de todas as regras.
+   */
+  async getOperationalAlerts(params: { limit?: number } = {}, now: Date = new Date()): Promise<OperationalAlertsOverview> {
+    const limit = Math.min(MAX_ALERT_LIST_LIMIT, Math.max(1, params.limit ?? DEFAULT_ALERT_LIST_LIMIT));
+    const overdueCutoff = new Date(now.getTime() - PENDING_PAYMENT_OVERDUE_DAYS * 86_400_000);
+
+    const semPagamentoWhere = {
+      plannedHarvestDate: { lte: now },
+      downPaymentCompleted: false,
+      status: ACTIVE_SALE_STATUS_FILTER,
+    };
+    const semUploadWhere = {
+      shippedAt: { not: null },
+      status: ACTIVE_SALE_STATUS_FILTER,
+      operationDocuments: { none: { docType: "nota_fiscal" } },
+    };
+    const entregaAtrasadaWhere = {
+      plannedDeliveryDate: { lt: now },
+      actualDeliveryDate: null,
+      status: ACTIVE_SALE_STATUS_FILTER,
+    };
+    const pagamentoVencidoWhere = {
+      status: ACTIVE_SALE_STATUS_FILTER,
+      Payment: { some: { status: "pending", createdAt: { lt: overdueCutoff } } },
+    };
+
+    const saleIdCols = { select: { id: true, orderNumber: true } };
+
+    const [
+      semPagamentoCount, semPagamentoRows,
+      semUploadCount, semUploadRows,
+      entregaAtrasadaCount, entregaAtrasadaRows,
+      pagamentoVencidoCount, pagamentoVencidoRows,
+    ] = await Promise.all([
+      this.prisma.saleData.count({ where: semPagamentoWhere }),
+      this.prisma.saleData.findMany({ where: semPagamentoWhere, orderBy: { plannedHarvestDate: "asc" }, take: limit, ...saleIdCols }),
+      this.prisma.saleData.count({ where: semUploadWhere }),
+      this.prisma.saleData.findMany({ where: semUploadWhere, orderBy: { shippedAt: "asc" }, take: limit, ...saleIdCols }),
+      this.prisma.saleData.count({ where: entregaAtrasadaWhere }),
+      this.prisma.saleData.findMany({ where: entregaAtrasadaWhere, orderBy: { plannedDeliveryDate: "asc" }, take: limit, ...saleIdCols }),
+      this.prisma.saleData.count({ where: pagamentoVencidoWhere }),
+      this.prisma.saleData.findMany({ where: pagamentoVencidoWhere, orderBy: { orderNumber: "asc" }, take: limit, ...saleIdCols }),
+    ]);
+
+    const counts: OperationalAlertCounts = {
+      semPagamentoAntesColheita: semPagamentoCount,
+      semUploadDocumentos: semUploadCount,
+      entregaAtrasada: entregaAtrasadaCount,
+      pagamentoVencido: pagamentoVencidoCount,
+    };
+
+    const buildItems = (rows: { id: string; orderNumber: number }[], type: keyof typeof ALERT_TYPES): OperationalAlertItem[] =>
+      rows.map((row) => ({ id: row.id, orderNumber: row.orderNumber, ...ALERT_TYPES[type] }));
+
+    const items = [
+      ...buildItems(semPagamentoRows, "semPagamentoAntesColheita"),
+      ...buildItems(semUploadRows, "semUploadDocumentos"),
+      ...buildItems(entregaAtrasadaRows, "entregaAtrasada"),
+      ...buildItems(pagamentoVencidoRows, "pagamentoVencido"),
+    ].slice(0, limit);
+
+    const total = counts.semPagamentoAntesColheita + counts.semUploadDocumentos + counts.entregaAtrasada + counts.pagamentoVencido;
+
+    return { counts, list: { items, total, limit } };
+  }
+
+  /**
+   * Logística e Desempenho: tempo médio de entrega (shippedAt → actualDeliveryDate), % no prazo e
+   * atraso médio (plannedDeliveryDate x actualDeliveryDate), + desempenho por comprador/vendedor.
+   * Considera só vendas efetivamente entregues (actualDeliveryDate preenchido), fora Canceladas/Recusadas.
+   */
+  async getLogisticsOverview(): Promise<LogisticsOverview> {
+    const deliveredSales = await this.prisma.saleData.findMany({
+      where: { actualDeliveryDate: { not: null }, status: ACTIVE_SALE_STATUS_FILTER },
+      select: {
+        shippedAt: true,
+        actualDeliveryDate: true,
+        plannedDeliveryDate: true,
+        buyerId: true,
+        buyer: { select: { name: true } },
+        boughtProducts: {
+          select: { product: { select: { sellerId: true, seller: { select: { name: true } } } } },
+        },
+      },
+    });
+
+    const deliveryDurations: number[] = [];
+    const delayDurations: number[] = [];
+    let onTimeCount = 0;
+    let onTimeEligibleCount = 0;
+
+    const buyerStats = new Map<string, { name: string; delivered: number; onTime: number }>();
+    const sellerStats = new Map<string, { name: string; delivered: number; onTime: number }>();
+
+    for (const sale of deliveredSales) {
+      const actualDeliveryDate = sale.actualDeliveryDate as Date;
+
+      if (sale.shippedAt) {
+        deliveryDurations.push(diffInDays(sale.shippedAt, actualDeliveryDate));
+      }
+
+      if (sale.plannedDeliveryDate) {
+        onTimeEligibleCount += 1;
+        const isOnTime = actualDeliveryDate <= sale.plannedDeliveryDate;
+        if (isOnTime) onTimeCount += 1;
+        else delayDurations.push(diffInDays(sale.plannedDeliveryDate, actualDeliveryDate));
+
+        const buyerEntry = buyerStats.get(sale.buyerId) ?? { name: sale.buyer.name, delivered: 0, onTime: 0 };
+        buyerEntry.delivered += 1;
+        if (isOnTime) buyerEntry.onTime += 1;
+        buyerStats.set(sale.buyerId, buyerEntry);
+
+        const sellerIds = new Set(sale.boughtProducts.map((bp) => bp.product.sellerId));
+        for (const sellerId of sellerIds) {
+          const sellerName = sale.boughtProducts.find((bp) => bp.product.sellerId === sellerId)!.product.seller.name;
+          const sellerEntry = sellerStats.get(sellerId) ?? { name: sellerName, delivered: 0, onTime: 0 };
+          sellerEntry.delivered += 1;
+          if (isOnTime) sellerEntry.onTime += 1;
+          sellerStats.set(sellerId, sellerEntry);
+        }
+      }
+    }
+
+    const toPerformanceList = (stats: Map<string, { name: string; delivered: number; onTime: number }>): LogisticsPartyPerformance[] =>
+      [...stats.entries()]
+        .map(([id, s]) => {
+          const onTimePercent = round1((s.onTime / s.delivered) * 100);
+          return { id, name: s.name, delivered: s.delivered, onTimePercent, alerta: onTimePercent < ON_TIME_ALERT_THRESHOLD_PERCENT };
+        })
+        .sort((a, b) => a.onTimePercent - b.onTimePercent);
+
+    const avgDeliveryDays = average(deliveryDurations);
+    const avgDelayDays = average(delayDurations);
+
+    return {
+      deliveredCount: deliveredSales.length,
+      averageDeliveryDays: avgDeliveryDays !== null ? round1(avgDeliveryDays) : null,
+      onTimePercent: onTimeEligibleCount > 0 ? round1((onTimeCount / onTimeEligibleCount) * 100) : null,
+      averageDelayDays: avgDelayDays !== null ? round1(avgDelayDays) : null,
+      byBuyer: toPerformanceList(buyerStats),
+      bySeller: toPerformanceList(sellerStats),
+    };
   }
 }
