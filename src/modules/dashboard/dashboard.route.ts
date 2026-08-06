@@ -108,7 +108,10 @@ router.get("/executive-overview", controller.getExecutiveOverview as RequestHand
  *       - in: query
  *         name: stage
  *         schema: { type: string, example: "4,5,6" }
- *         description: Lista de etapas separadas por vírgula (0-10; 0 = terminal Cancelado/Recusado) para filtrar só a lista detalhada
+ *         description: >
+ *           Lista de etapas separadas por vírgula (0-10; 0 = terminal Cancelado/Recusado) para filtrar só a lista detalhada.
+ *           Se usado sem startDate, a busca fica limitada aos últimos 180 dias (janela máxima interna) para manter
+ *           tempo de resposta estável — informe startDate explicitamente para consultar um período diferente.
  *     responses:
  *       200:
  *         description: Dados agregados do pipeline

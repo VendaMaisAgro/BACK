@@ -135,6 +135,13 @@ function buildCreatedAtWhere(filter: PipelineDateFilter): Record<string, unknown
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
+/**
+ * Quando o filtro `stage` é usado sem startDate, o scan leve precisa de uma janela máxima —
+ * senão pode virar um scan do dataset inteiro (etapa é campo derivado, não dá pra filtrar/paginar
+ * só no banco). 180 dias cobre o uso prático (ver "quem está em tal etapa" recentemente).
+ */
+const MAX_STAGE_FILTER_WINDOW_DAYS = 180;
+
 /** Prazo padrão (dias) considerado para um pagamento pendente "vencer" — mesmo default usado ao gerar boleto (expirationDays). */
 const PENDING_PAYMENT_OVERDUE_DAYS = 3;
 const DEFAULT_ALERT_LIST_LIMIT = 50;
@@ -397,8 +404,20 @@ export class DashboardService {
 
     if (params.stage && params.stage.length > 0) {
       const stageSet = new Set(params.stage);
+
+      // Sem startDate, o scan leve fica sem limite superior de idade — impõe uma janela máxima
+      // pra manter o comportamento estável independente do volume de vendas.
+      const stageFilterWhere = params.startDate
+        ? createdAtWhere
+        : buildCreatedAtWhere({
+            startDate: new Date(now.getTime() - MAX_STAGE_FILTER_WINDOW_DAYS * 86_400_000),
+            endDate: params.endDate,
+          });
+
+      // stage não depende de Payment (calculatePipelineStage só usa Payment para enteredAt/daysInStage,
+      // que aqui não são lidos) — omitir a relação evita I/O e payload desnecessários neste scan.
       const lightRows = await this.prisma.saleData.findMany({
-        where: createdAtWhere,
+        where: stageFilterWhere,
         orderBy: { orderNumber: "desc" },
         select: {
           id: true,
@@ -411,7 +430,6 @@ export class DashboardService {
           arrivedAt: true,
           actualDeliveryDate: true,
           weightDocumentId: true,
-          Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
         },
       });
 
@@ -582,9 +600,11 @@ export class DashboardService {
         if (isOnTime) buyerEntry.onTime += 1;
         buyerStats.set(sale.buyerId, buyerEntry);
 
-        const sellerIds = new Set(sale.boughtProducts.map((bp) => bp.product.sellerId));
-        for (const sellerId of sellerIds) {
-          const sellerName = sale.boughtProducts.find((bp) => bp.product.sellerId === sellerId)!.product.seller.name;
+        const sellerNameById = new Map<string, string>();
+        for (const bp of sale.boughtProducts) {
+          sellerNameById.set(bp.product.sellerId, bp.product.seller.name);
+        }
+        for (const [sellerId, sellerName] of sellerNameById) {
           const sellerEntry = sellerStats.get(sellerId) ?? { name: sellerName, delivered: 0, onTime: 0 };
           sellerEntry.delivered += 1;
           if (isOnTime) sellerEntry.onTime += 1;
