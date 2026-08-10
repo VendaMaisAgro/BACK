@@ -27,10 +27,22 @@ function parseStageListParam(raw: unknown): number[] | undefined | "invalid" {
   return allValid ? stages : "invalid";
 }
 
+/** Retorna undefined se ausente/vazio, ou a string se presente (query params de filtro são sempre IDs). */
+function parseOptionalStringParam(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  return raw;
+}
+
 export class DashboardController {
-  public getExecutiveOverview: RequestHandler = async (_req: Request, res: Response): Promise<void> => {
+  public getExecutiveOverview: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
-      const result = await service.getExecutiveOverview();
+      const filters = {
+        produtoId: parseOptionalStringParam(req.query.produto),
+        compradorId: parseOptionalStringParam(req.query.comprador),
+        vendedorId: parseOptionalStringParam(req.query.vendedor),
+        tipoOperacao: parseOptionalStringParam(req.query.tipoOperacao),
+      };
+      const result = await service.getExecutiveOverview(filters);
       res.status(200).json(result);
     } catch (error: any) {
       console.error(error);

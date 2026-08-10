@@ -19,9 +19,36 @@ router.use(requireAdmin as RequestHandler);
  *       Operações: contagem de vendas.
  *       Previsto agrupa pelo mês de plannedDeliveryDate; Realizado agrupa pelo mês de actualDeliveryDate
  *       (Faturamento/Operações) ou pelo mês de confirmação do pagamento (Receita).
+ *       counters/pipeline/faturamentoPorProduto/origemDestino/principaisCompradores/principaisVendedores
+ *       consideram vendas com createdAt nos últimos 12 meses (mesmo critério de "período" do
+ *       GET /dashboard/pipeline), já com os filtros produto/comprador/vendedor aplicados.
+ *       Ativa/Concluída/Bloqueada reaproveitam a mesma etapa do pipeline (calculatePipelineStage):
+ *       stage 10 = concluída, stage 0 (Cancelado/Recusado) = bloqueada, 1-9 = ativa. valorRetido soma
+ *       pagamentos completed das vendas entre as etapas "Pagamento em escrow" (2) e "Aceite" (8) —
+ *       pago pelo comprador, ainda não liberado ao vendedor.
  *     tags: [Dashboard]
  *     security:
  *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: produto
+ *         schema: { type: string, format: uuid }
+ *         description: Filtra por id do produto (ver filterOptions.produtos)
+ *       - in: query
+ *         name: comprador
+ *         schema: { type: string, format: uuid }
+ *         description: Filtra por id do comprador (ver filterOptions.compradores)
+ *       - in: query
+ *         name: vendedor
+ *         schema: { type: string, format: uuid }
+ *         description: Filtra por id do vendedor (ver filterOptions.vendedores)
+ *       - in: query
+ *         name: tipoOperacao
+ *         schema: { type: string }
+ *         description: >
+ *           Aceito por paridade com os demais filtros, mas sem efeito hoje — não há campo no schema
+ *           que represente "tipo de operação" (em standby até o cliente definir a fonte do dado).
+ *           filterOptions.tiposOperacao sempre retorna [].
  *     responses:
  *       200:
  *         description: Dados agregados dos últimos 12 meses
@@ -67,6 +94,62 @@ router.use(requireAdmin as RequestHandler);
  *                           label: { type: string, example: "jul/2026" }
  *                           previsto: { type: integer, example: 12 }
  *                           realizado: { type: integer, example: 10 }
+ *                 counters:
+ *                   type: object
+ *                   properties:
+ *                     operacoesAtivas: { type: integer, example: 45 }
+ *                     operacoesConcluidas: { type: integer, example: 32 }
+ *                     operacoesBloqueadas: { type: integer, example: 8 }
+ *                     valorRetido: { type: number, example: 350000.0, description: "Pagamentos completed em escrow (etapas 2-8), ainda não liberados ao vendedor" }
+ *                 filterOptions:
+ *                   type: object
+ *                   properties:
+ *                     produtos:
+ *                       type: array
+ *                       items: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string } } }
+ *                     compradores:
+ *                       type: array
+ *                       items: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string } } }
+ *                     vendedores:
+ *                       type: array
+ *                       items: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string } } }
+ *                     tiposOperacao:
+ *                       type: array
+ *                       items: { type: object }
+ *                       description: Sempre [] — ver descrição do parâmetro tipoOperacao
+ *                 faturamentoPorProduto:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       produto: { type: string, example: "Manga" }
+ *                       valor: { type: number, example: 1470000.0 }
+ *                       percentual: { type: number, example: 60.0 }
+ *                 origemDestino:
+ *                   type: array
+ *                   description: Uma linha por rota (UF origem do vendedor → UF destino da entrega)
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       origem: { type: string, example: "SP" }
+ *                       destino: { type: string, example: "RJ" }
+ *                       quantidade: { type: integer, example: 8 }
+ *                       valor: { type: number, example: 245000.0 }
+ *                 principaisCompradores:
+ *                   type: array
+ *                   description: Top 5 por faturamento + bucket "Outros" com o restante
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       nome: { type: string, example: "Exportadora XPTO" }
+ *                       faturamento: { type: number, example: 780000.0 }
+ *                       percentualParticipacao: { type: number, example: 21.4 }
+ *                 principaisVendedores:
+ *                   type: array
+ *                   description: Mesma estrutura de principaisCompradores
+ *                 pipeline:
+ *                   type: object
+ *                   description: Mesmo formato de statusCounts/terminal/funnel de GET /dashboard/pipeline, calculado sobre o período/filtros deste endpoint
  *       401: { description: Não autenticado }
  *       403: { description: Acesso restrito a administradores }
  */
