@@ -151,6 +151,21 @@ function buildSaleFilterWhere(filters: ExecutiveOverviewFilters): Record<string,
   return where;
 }
 
+/**
+ * buildSaleFilterWhere só garante que a VENDA tenha ao menos uma linha batendo com produto/vendedor —
+ * uma venda com múltiplos vendedores/produtos continua trazendo TODAS as linhas de boughtProducts.
+ * Os agregados por linha (faturamento por produto, origem x destino, principais vendedores) precisam
+ * reaplicar o mesmo filtro aqui, por item, senão vazam produtos/vendedores fora do filtro selecionado.
+ */
+function boughtProductMatchesFilters(
+  bp: { productId: string; product: { sellerId: string } },
+  filters: ExecutiveOverviewFilters
+): boolean {
+  if (filters.produtoId && bp.productId !== filters.produtoId) return false;
+  if (filters.vendedorId && bp.product.sellerId !== filters.vendedorId) return false;
+  return true;
+}
+
 const FUNNEL_BUCKETS = [
   { key: "cadastro", label: "Cadastro", minStage: 1 },
   { key: "pagamento", label: "Pagamento", minStage: 2 },
@@ -395,10 +410,10 @@ export class DashboardService {
       operacoes: { monthly: operacoesMonthly },
       counters: this.buildExecutiveCounters(periodSales, stageResults),
       filterOptions: this.buildFilterOptions(optionSales),
-      faturamentoPorProduto: this.buildFaturamentoPorProduto(periodSales),
-      origemDestino: this.buildOrigemDestino(periodSales),
+      faturamentoPorProduto: this.buildFaturamentoPorProduto(periodSales, filters),
+      origemDestino: this.buildOrigemDestino(periodSales, filters),
       principaisCompradores: this.buildPrincipaisCompradores(periodSales),
-      principaisVendedores: this.buildPrincipaisVendedores(periodSales),
+      principaisVendedores: this.buildPrincipaisVendedores(periodSales, filters),
       pipeline: this.tallyStageResults(stageResults),
     };
   }
@@ -428,6 +443,7 @@ export class DashboardService {
         shippingAddress: { select: { uf: true } },
         boughtProducts: {
           select: {
+            productId: true,
             value: true,
             product: {
               select: {
@@ -511,20 +527,27 @@ export class DashboardService {
     return { operacoesAtivas, operacoesConcluidas, operacoesBloqueadas, valorRetido: round2(valorRetido) };
   }
 
-  private buildFaturamentoPorProduto(sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>): ProductRevenue[] {
-    const totals = new Map<string, number>();
+  /** Agrupa por productId (Product.name não é @unique — nomes iguais em produtos diferentes não podem ser somados juntos). */
+  private buildFaturamentoPorProduto(
+    sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
+    filters: ExecutiveOverviewFilters
+  ): ProductRevenue[] {
+    const totals = new Map<string, { nome: string; valor: number }>();
     for (const sale of sales) {
       for (const bp of sale.boughtProducts) {
-        totals.set(bp.product.name, (totals.get(bp.product.name) ?? 0) + bp.value);
+        if (!boughtProductMatchesFilters(bp, filters)) continue;
+        const entry = totals.get(bp.productId) ?? { nome: bp.product.name, valor: 0 };
+        entry.valor += bp.value;
+        totals.set(bp.productId, entry);
       }
     }
 
-    const totalValue = [...totals.values()].reduce((sum, v) => sum + v, 0);
-    return [...totals.entries()]
-      .map(([produto, valor]) => ({
-        produto,
-        valor: round2(valor),
-        percentual: totalValue > 0 ? round1((valor / totalValue) * 100) : 0,
+    const totalValue = [...totals.values()].reduce((sum, e) => sum + e.valor, 0);
+    return [...totals.values()]
+      .map((e) => ({
+        produto: e.nome,
+        valor: round2(e.valor),
+        percentual: totalValue > 0 ? round1((e.valor / totalValue) * 100) : 0,
       }))
       .sort((a, b) => b.valor - a.valor);
   }
@@ -534,7 +557,10 @@ export class DashboardService {
    * Uma venda com produtos de vendedores diferentes gera uma rota por vendedor, com o valor
    * atribuído (soma dos boughtProducts daquele vendedor nessa venda) — não o valor total da venda.
    */
-  private buildOrigemDestino(sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>): RouteAggregate[] {
+  private buildOrigemDestino(
+    sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
+    filters: ExecutiveOverviewFilters
+  ): RouteAggregate[] {
     const routes = new Map<string, RouteAggregate>();
 
     for (const sale of sales) {
@@ -543,6 +569,7 @@ export class DashboardService {
       const ufPorVendedor = new Map<string, string>();
 
       for (const bp of sale.boughtProducts) {
+        if (!boughtProductMatchesFilters(bp, filters)) continue;
         const sellerId = bp.product.sellerId;
         valorPorVendedor.set(sellerId, (valorPorVendedor.get(sellerId) ?? 0) + bp.value);
         ufPorVendedor.set(sellerId, bp.product.seller.addresses[0]?.uf ?? UNKNOWN_UF);
@@ -571,10 +598,14 @@ export class DashboardService {
     return this.rankWithOutros(totals);
   }
 
-  private buildPrincipaisVendedores(sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>): PartyRanking[] {
+  private buildPrincipaisVendedores(
+    sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
+    filters: ExecutiveOverviewFilters
+  ): PartyRanking[] {
     const totals = new Map<string, { nome: string; valor: number }>();
     for (const sale of sales) {
       for (const bp of sale.boughtProducts) {
+        if (!boughtProductMatchesFilters(bp, filters)) continue;
         const entry = totals.get(bp.product.sellerId) ?? { nome: bp.product.seller.name, valor: 0 };
         entry.valor += bp.value;
         totals.set(bp.product.sellerId, entry);
