@@ -24,11 +24,69 @@ interface CountSeries {
   monthly: MonthlyValue[];
 }
 
+export interface ExecutiveOverviewFilters {
+  produtoId?: string;
+  compradorId?: string;
+  vendedorId?: string;
+  /**
+   * Aceito por paridade com os demais dropdowns do front, mas hoje sem efeito: não existe no schema
+   * um campo que represente "tipo de operação" (o mais próximo, TransportTypes, é sobre transporte,
+   * não sobre a natureza do negócio). Fica em standby até o cliente definir a fonte desse dado.
+   */
+  tipoOperacao?: string;
+}
+
+export interface FilterOption {
+  id: string;
+  name: string;
+}
+
+export interface ExecutiveFilterOptions {
+  produtos: FilterOption[];
+  compradores: FilterOption[];
+  vendedores: FilterOption[];
+  /** Sempre [] por enquanto — ver ExecutiveOverviewFilters.tipoOperacao. */
+  tiposOperacao: FilterOption[];
+}
+
+export interface ExecutiveCounters {
+  operacoesAtivas: number;
+  operacoesConcluidas: number;
+  operacoesBloqueadas: number;
+  valorRetido: number;
+}
+
+export interface ProductRevenue {
+  produto: string;
+  valor: number;
+  percentual: number;
+}
+
+export interface RouteAggregate {
+  origem: string;
+  destino: string;
+  quantidade: number;
+  valor: number;
+}
+
+export interface PartyRanking {
+  nome: string;
+  faturamento: number;
+  percentualParticipacao: number;
+}
+
 export interface ExecutiveOverview {
   period: { from: string; to: string };
   faturamento: MoneySeries;
   receita: MoneySeries;
   operacoes: CountSeries;
+  counters: ExecutiveCounters;
+  filterOptions: ExecutiveFilterOptions;
+  faturamentoPorProduto: ProductRevenue[];
+  origemDestino: RouteAggregate[];
+  principaisCompradores: PartyRanking[];
+  principaisVendedores: PartyRanking[];
+  pipeline: PipelineSummary;
 }
 
 function buildLast12Months(now: Date): MonthBucket[] {
@@ -70,6 +128,42 @@ function contractTotalOf(sale: {
   boughtProducts: { value: number }[];
 }): number {
   return sale.adjustedContractTotal ?? sale.boughtProducts.reduce((sum, bp) => sum + bp.value, 0) + sale.transportValue;
+}
+
+const UNKNOWN_UF = "N/D";
+const TOP_RANKING_SIZE = 5;
+
+/**
+ * produto/vendedor precisam bater na MESMA linha de boughtProducts (o produto X vendido pelo vendedor Y),
+ * por isso viram um único `some` combinado — dois `some` separados poderiam casar itens diferentes da venda.
+ */
+function buildSaleFilterWhere(filters: ExecutiveOverviewFilters): Record<string, unknown> {
+  const where: Record<string, unknown> = {};
+  if (filters.compradorId) where.buyerId = filters.compradorId;
+  if (filters.produtoId || filters.vendedorId) {
+    where.boughtProducts = {
+      some: {
+        ...(filters.produtoId && { productId: filters.produtoId }),
+        ...(filters.vendedorId && { product: { sellerId: filters.vendedorId } }),
+      },
+    };
+  }
+  return where;
+}
+
+/**
+ * buildSaleFilterWhere só garante que a VENDA tenha ao menos uma linha batendo com produto/vendedor —
+ * uma venda com múltiplos vendedores/produtos continua trazendo TODAS as linhas de boughtProducts.
+ * Os agregados por linha (faturamento por produto, origem x destino, principais vendedores) precisam
+ * reaplicar o mesmo filtro aqui, por item, senão vazam produtos/vendedores fora do filtro selecionado.
+ */
+function boughtProductMatchesFilters(
+  bp: { productId: string; product: { sellerId: string } },
+  filters: ExecutiveOverviewFilters
+): boolean {
+  if (filters.produtoId && bp.productId !== filters.produtoId) return false;
+  if (filters.vendedorId && bp.product.sellerId !== filters.vendedorId) return false;
+  return true;
 }
 
 const FUNNEL_BUCKETS = [
@@ -224,14 +318,15 @@ export class DashboardService {
    * Previsto agrupa pela data planejada de entrega (plannedDeliveryDate); Realizado agrupa pela
    * data efetiva (actualDeliveryDate para faturamento/operações, Payment.updatedAt para receita).
    */
-  async getExecutiveOverview(now: Date = new Date()): Promise<ExecutiveOverview> {
+  async getExecutiveOverview(filters: ExecutiveOverviewFilters = {}, now: Date = new Date()): Promise<ExecutiveOverview> {
     const months = buildLast12Months(now);
     const windowStart = months[0].start;
     const windowEnd = months[months.length - 1].end;
+    const saleFilterWhere = buildSaleFilterWhere(filters);
 
-    const [previstoSales, realizadoSales, completedPayments] = await Promise.all([
+    const [previstoSales, realizadoSales, completedPayments, periodSales, optionSales] = await Promise.all([
       this.prisma.saleData.findMany({
-        where: { plannedDeliveryDate: { gte: windowStart, lt: windowEnd } },
+        where: { plannedDeliveryDate: { gte: windowStart, lt: windowEnd }, ...saleFilterWhere },
         select: {
           plannedDeliveryDate: true,
           transportValue: true,
@@ -240,7 +335,7 @@ export class DashboardService {
         },
       }),
       this.prisma.saleData.findMany({
-        where: { actualDeliveryDate: { gte: windowStart, lt: windowEnd } },
+        where: { actualDeliveryDate: { gte: windowStart, lt: windowEnd }, ...saleFilterWhere },
         select: {
           actualDeliveryDate: true,
           transportValue: true,
@@ -249,9 +344,11 @@ export class DashboardService {
         },
       }),
       this.prisma.payment.findMany({
-        where: { status: "completed", updatedAt: { gte: windowStart, lt: windowEnd } },
+        where: { status: "completed", updatedAt: { gte: windowStart, lt: windowEnd }, sale: saleFilterWhere },
         select: { amount: true, updatedAt: true },
       }),
+      this.getExecutivePeriodSales(windowStart, windowEnd, saleFilterWhere),
+      this.getExecutiveOptionSales(windowStart, windowEnd),
     ]);
 
     const previstoPorMes = new Map<string, number>();
@@ -295,6 +392,11 @@ export class DashboardService {
     const sumField = (arr: MonthlyValue[], field: "previsto" | "realizado") =>
       round2(arr.reduce((sum, m) => sum + m[field], 0));
 
+    // periodSales considera createdAt (data do pedido) nos últimos 12 meses — mesmo critério de
+    // "período" já usado em GET /dashboard/pipeline — diferente de previsto/realizado acima, que
+    // olham plannedDeliveryDate/actualDeliveryDate. Um único scan alimenta pipeline/contadores/rankings.
+    const stageResults = periodSales.map((sale) => calculatePipelineStage(sale, now));
+
     return {
       period: { from: months[0].key, to: months[months.length - 1].key },
       faturamento: {
@@ -306,7 +408,229 @@ export class DashboardService {
         accumulated: { previsto: sumField(receitaMonthly, "previsto"), realizado: sumField(receitaMonthly, "realizado") },
       },
       operacoes: { monthly: operacoesMonthly },
+      counters: this.buildExecutiveCounters(periodSales, stageResults),
+      filterOptions: this.buildFilterOptions(optionSales),
+      faturamentoPorProduto: this.buildFaturamentoPorProduto(periodSales, filters),
+      origemDestino: this.buildOrigemDestino(periodSales, filters),
+      principaisCompradores: this.buildPrincipaisCompradores(periodSales),
+      principaisVendedores: this.buildPrincipaisVendedores(periodSales, filters),
+      pipeline: this.tallyStageResults(stageResults),
     };
+  }
+
+  /**
+   * Dataset único (1 venda = 1 linha) usado por counters/rankings/agregações do executive-overview.
+   * Traz os mesmos campos "leves" de calculatePipelineStage + o necessário para valor/produto/comprador/
+   * vendedor/UF, evitando um scan por bloco do dashboard.
+   */
+  private async getExecutivePeriodSales(windowStart: Date, windowEnd: Date, saleFilterWhere: Record<string, unknown>) {
+    return this.prisma.saleData.findMany({
+      where: { createdAt: { gte: windowStart, lt: windowEnd }, ...saleFilterWhere },
+      select: {
+        status: true,
+        createdAt: true,
+        statusChangedAt: true,
+        downPaymentCompleted: true,
+        paymentCompleted: true,
+        shippedAt: true,
+        arrivedAt: true,
+        actualDeliveryDate: true,
+        weightDocumentId: true,
+        transportValue: true,
+        adjustedContractTotal: true,
+        buyerId: true,
+        buyer: { select: { name: true } },
+        shippingAddress: { select: { uf: true } },
+        boughtProducts: {
+          select: {
+            productId: true,
+            value: true,
+            product: {
+              select: {
+                name: true,
+                sellerId: true,
+                seller: { select: { name: true, addresses: { where: { default: true }, take: 1, select: { uf: true } } } },
+              },
+            },
+          },
+        },
+        Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true, amount: true } },
+      },
+    });
+  }
+
+  /** Base (sem os filtros produto/comprador/vendedor) pra popular os 3 primeiros dropdowns do front. */
+  private async getExecutiveOptionSales(windowStart: Date, windowEnd: Date) {
+    return this.prisma.saleData.findMany({
+      where: { createdAt: { gte: windowStart, lt: windowEnd } },
+      select: {
+        buyerId: true,
+        buyer: { select: { name: true } },
+        boughtProducts: {
+          select: { product: { select: { id: true, name: true, sellerId: true, seller: { select: { name: true } } } } },
+        },
+      },
+    });
+  }
+
+  private buildFilterOptions(sales: Awaited<ReturnType<DashboardService["getExecutiveOptionSales"]>>): ExecutiveFilterOptions {
+    const produtos = new Map<string, string>();
+    const compradores = new Map<string, string>();
+    const vendedores = new Map<string, string>();
+
+    for (const sale of sales) {
+      compradores.set(sale.buyerId, sale.buyer.name);
+      for (const bp of sale.boughtProducts) {
+        produtos.set(bp.product.id, bp.product.name);
+        vendedores.set(bp.product.sellerId, bp.product.seller.name);
+      }
+    }
+
+    const toSortedOptions = (map: Map<string, string>): FilterOption[] =>
+      [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+    return {
+      produtos: toSortedOptions(produtos),
+      compradores: toSortedOptions(compradores),
+      vendedores: toSortedOptions(vendedores),
+      tiposOperacao: [],
+    };
+  }
+
+  /**
+   * Ativa/Concluída/Bloqueada reaproveitam a MESMA régua de etapa do pipeline (calculatePipelineStage),
+   * em vez de uma segunda definição de status: stage 10 = concluída, stage 0 (Cancelado/Recusado) = bloqueada
+   * (estado terminal que exige atenção), 1-9 = ativa.
+   * valorRetido: soma dos pagamentos já confirmados (completed) das vendas cuja etapa está entre
+   * "Pagamento em escrow" (2) e "Aceite" (8) — pago pelo comprador, mas ainda não liberado ao vendedor.
+   */
+  private buildExecutiveCounters(
+    sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
+    stageResults: ReturnType<typeof calculatePipelineStage>[]
+  ): ExecutiveCounters {
+    let operacoesAtivas = 0;
+    let operacoesConcluidas = 0;
+    let operacoesBloqueadas = 0;
+    let valorRetido = 0;
+
+    sales.forEach((sale, index) => {
+      const stage = stageResults[index].stage;
+      if (stage === 0) operacoesBloqueadas += 1;
+      else if (stage === 10) operacoesConcluidas += 1;
+      else operacoesAtivas += 1;
+
+      if (stage >= 2 && stage <= 8) {
+        valorRetido += sale.Payment.reduce((sum, p) => sum + p.amount, 0);
+      }
+    });
+
+    return { operacoesAtivas, operacoesConcluidas, operacoesBloqueadas, valorRetido: round2(valorRetido) };
+  }
+
+  /** Agrupa por productId (Product.name não é @unique — nomes iguais em produtos diferentes não podem ser somados juntos). */
+  private buildFaturamentoPorProduto(
+    sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
+    filters: ExecutiveOverviewFilters
+  ): ProductRevenue[] {
+    const totals = new Map<string, { nome: string; valor: number }>();
+    for (const sale of sales) {
+      for (const bp of sale.boughtProducts) {
+        if (!boughtProductMatchesFilters(bp, filters)) continue;
+        const entry = totals.get(bp.productId) ?? { nome: bp.product.name, valor: 0 };
+        entry.valor += bp.value;
+        totals.set(bp.productId, entry);
+      }
+    }
+
+    const totalValue = [...totals.values()].reduce((sum, e) => sum + e.valor, 0);
+    return [...totals.values()]
+      .map((e) => ({
+        produto: e.nome,
+        valor: round2(e.valor),
+        percentual: totalValue > 0 ? round1((e.valor / totalValue) * 100) : 0,
+      }))
+      .sort((a, b) => b.valor - a.valor);
+  }
+
+  /**
+   * Origem = UF do endereço padrão do vendedor; Destino = UF do endereço de entrega da venda.
+   * Uma venda com produtos de vendedores diferentes gera uma rota por vendedor, com o valor
+   * atribuído (soma dos boughtProducts daquele vendedor nessa venda) — não o valor total da venda.
+   */
+  private buildOrigemDestino(
+    sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
+    filters: ExecutiveOverviewFilters
+  ): RouteAggregate[] {
+    const routes = new Map<string, RouteAggregate>();
+
+    for (const sale of sales) {
+      const destino = sale.shippingAddress?.uf ?? UNKNOWN_UF;
+      const valorPorVendedor = new Map<string, number>();
+      const ufPorVendedor = new Map<string, string>();
+
+      for (const bp of sale.boughtProducts) {
+        if (!boughtProductMatchesFilters(bp, filters)) continue;
+        const sellerId = bp.product.sellerId;
+        valorPorVendedor.set(sellerId, (valorPorVendedor.get(sellerId) ?? 0) + bp.value);
+        ufPorVendedor.set(sellerId, bp.product.seller.addresses[0]?.uf ?? UNKNOWN_UF);
+      }
+
+      for (const [sellerId, valor] of valorPorVendedor) {
+        const origem = ufPorVendedor.get(sellerId) ?? UNKNOWN_UF;
+        const key = `${origem}->${destino}`;
+        const existing = routes.get(key) ?? { origem, destino, quantidade: 0, valor: 0 };
+        existing.quantidade += 1;
+        existing.valor += valor;
+        routes.set(key, existing);
+      }
+    }
+
+    return [...routes.values()].map((r) => ({ ...r, valor: round2(r.valor) })).sort((a, b) => b.valor - a.valor);
+  }
+
+  private buildPrincipaisCompradores(sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>): PartyRanking[] {
+    const totals = new Map<string, { nome: string; valor: number }>();
+    for (const sale of sales) {
+      const entry = totals.get(sale.buyerId) ?? { nome: sale.buyer.name, valor: 0 };
+      entry.valor += contractTotalOf(sale);
+      totals.set(sale.buyerId, entry);
+    }
+    return this.rankWithOutros(totals);
+  }
+
+  private buildPrincipaisVendedores(
+    sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
+    filters: ExecutiveOverviewFilters
+  ): PartyRanking[] {
+    const totals = new Map<string, { nome: string; valor: number }>();
+    for (const sale of sales) {
+      for (const bp of sale.boughtProducts) {
+        if (!boughtProductMatchesFilters(bp, filters)) continue;
+        const entry = totals.get(bp.product.sellerId) ?? { nome: bp.product.seller.name, valor: 0 };
+        entry.valor += bp.value;
+        totals.set(bp.product.sellerId, entry);
+      }
+    }
+    return this.rankWithOutros(totals);
+  }
+
+  /** Top N por valor desc + um bucket "Outros" agregando o resto (igual ao mockup). */
+  private rankWithOutros(totals: Map<string, { nome: string; valor: number }>): PartyRanking[] {
+    const totalValue = [...totals.values()].reduce((sum, e) => sum + e.valor, 0);
+    const sorted = [...totals.values()].sort((a, b) => b.valor - a.valor);
+    const top = sorted.slice(0, TOP_RANKING_SIZE);
+    const rest = sorted.slice(TOP_RANKING_SIZE);
+    const restValue = rest.reduce((sum, e) => sum + e.valor, 0);
+
+    const toRanking = (nome: string, valor: number): PartyRanking => ({
+      nome,
+      faturamento: round2(valor),
+      percentualParticipacao: totalValue > 0 ? round1((valor / totalValue) * 100) : 0,
+    });
+
+    const result = top.map((e) => toRanking(e.nome, e.valor));
+    if (rest.length > 0) result.push(toRanking("Outros", restValue));
+    return result;
   }
 
   /**
@@ -331,6 +655,13 @@ export class DashboardService {
       },
     });
 
+    const stageResults = sales.map((sale) => calculatePipelineStage(sale, now));
+    return this.tallyStageResults(stageResults);
+  }
+
+  /** Tally puro a partir de PipelineStageResult já calculados — reaproveitado pelo executive-overview
+   * (que precisa do mesmo resumo, mas já calcula a etapa de cada venda para outros blocos do dashboard). */
+  private tallyStageResults(stageResults: ReturnType<typeof calculatePipelineStage>[]): PipelineSummary {
     const statusCounts: PipelineStatusCount[] = PIPELINE_STAGES.map((s) => ({ ...s, count: 0 }));
     const terminal: PipelineStatusCount[] = [
       { stage: 0, key: "cancelado", label: "Cancelado", count: 0 },
@@ -338,9 +669,7 @@ export class DashboardService {
     ];
     const funnel: PipelineFunnelBucket[] = FUNNEL_BUCKETS.map(({ key, label }) => ({ key, label, count: 0 }));
 
-    for (const sale of sales) {
-      const stageResult = calculatePipelineStage(sale, now);
-
+    for (const stageResult of stageResults) {
       if (stageResult.stage === 0) {
         const bucket = terminal.find((t) => t.key === stageResult.key);
         if (bucket) bucket.count += 1;
