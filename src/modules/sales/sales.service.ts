@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { CreateSaleDataDto, SellerDecisionDto, UpdateSaleDataDto } from "./dto/create-sales.dto";
 import { addBusinessDays, isWithinBusinessDays, lessThanHoursRemaining } from "../../lib/businessDays";
+import { calculatePipelineStage, PipelineStageResult } from "../../lib/pipelineStage";
 
 export class SaleService {
   private readonly prisma: PrismaClient;
@@ -79,6 +80,7 @@ export class SaleService {
           productRating: data.productRating ?? 0,
           sellerRating: data.sellerRating ?? 0,
           status: data.status ?? "Pedido realizado!",
+          statusChangedAt: data.createdAt ?? new Date(),
           sellerApproved: data.sellerApproved ?? null,
           addressId: data.addressId ?? null,
           paymentMethodId: data.paymentMethodId,
@@ -406,6 +408,13 @@ export class SaleService {
       }
     }
 
+    // statusChangedAt só deve mudar quando o status efetivamente muda (evita resetar "dias na
+    // etapa" em updates que reenviam o mesmo status já vigente).
+    const needsStatusCheck = data.status !== undefined || data.sellerApproved !== undefined;
+    const currentStatus = needsStatusCheck
+      ? (await this.prisma.saleData.findUnique({ where: { id }, select: { status: true } }))?.status
+      : undefined;
+
     const updateData: any = {
       ...(data.transportTypeId !== undefined && { transportTypeId: data.transportTypeId }),
       ...(data.createdAt && { createdAt: data.createdAt }),
@@ -437,6 +446,10 @@ export class SaleService {
     // Sincronizar status quando sellerApproved vier no update
     if (data.sellerApproved === true) updateData.status = "Aprovado pelo vendedor";
     if (data.sellerApproved === false) updateData.status = "Recusado pelo vendedor";
+
+    if (needsStatusCheck && updateData.status !== undefined && updateData.status !== currentStatus) {
+      updateData.statusChangedAt = new Date();
+    }
 
     if (data.boughtProducts) {
       const boughtProductsWithCalculatedValue = await Promise.all(
@@ -539,7 +552,7 @@ export class SaleService {
 
     return this.prisma.saleData.update({
       where: { id: saleId },
-      data: { sellerApproved: dto.approved, status: newStatus, ...dateFields },
+      data: { sellerApproved: dto.approved, status: newStatus, statusChangedAt: new Date(), ...dateFields },
       include: { boughtProducts: true },
     });
   }
@@ -580,7 +593,7 @@ export class SaleService {
         if (afterDeliveryDate) {
           await tx.saleData.update({
             where: { id: params.saleId },
-            data: { actualDeliveryDate: now, status: 'Entregue' },
+            data: { actualDeliveryDate: now, status: 'Entregue', statusChangedAt: now },
           });
         }
       }
@@ -623,6 +636,7 @@ export class SaleService {
       data: {
         actualDeliveryDate: tacitDeadline,
         status: 'Concluído',
+        statusChangedAt: tacitDeadline,
       },
     });
 
@@ -645,7 +659,7 @@ export class SaleService {
 
     return this.prisma.saleData.update({
       where: { id: saleId },
-      data: { status: 'Colheita autorizada' },
+      data: { status: 'Colheita autorizada', statusChangedAt: new Date() },
       include: { boughtProducts: true },
     });
   }
@@ -737,6 +751,7 @@ export class SaleService {
           cargoWeightKg: params.weightKg,
           weightDocumentId: doc.id,
           status: 'Aguardando pagamento final',
+          statusChangedAt: new Date(),
           ...(adjustedContractTotal !== null && { adjustedContractTotal }),
         },
         include: { boughtProducts: true },
@@ -842,9 +857,35 @@ export class SaleService {
         penaltyAmount: params.penaltyAmount ?? null,
         penaltyReason: params.reason,
         status: 'Cancelado',
+        statusChangedAt: new Date(),
       },
       include: { boughtProducts: true },
     });
+  }
+
+  /**
+   * Calcula a etapa atual do pipeline de uma venda e há quantos dias ela está nessa etapa.
+   * Ver src/lib/pipelineStage.ts para a lógica de inferência a partir dos campos existentes.
+   */
+  async getPipelineStage(saleId: string): Promise<PipelineStageResult> {
+    const sale = await this.prisma.saleData.findUnique({
+      where: { id: saleId },
+      select: {
+        status: true,
+        createdAt: true,
+        statusChangedAt: true,
+        downPaymentCompleted: true,
+        paymentCompleted: true,
+        shippedAt: true,
+        arrivedAt: true,
+        actualDeliveryDate: true,
+        weightDocumentId: true,
+        Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
+      },
+    });
+    if (!sale) throw new Error(`Venda (id=${saleId}) não encontrada`);
+
+    return calculatePipelineStage(sale);
   }
 
   /**

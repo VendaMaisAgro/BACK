@@ -18,6 +18,7 @@ import transportTypesRoutes from './modules/transport-types/transport-types.rout
 import paymentMethodsRoutes from './modules/payment-methods/payment-methods.route';
 import paymentRoutes from './modules/payment/payment.route';
 import { PaymentService } from './modules/payment/payment.service';
+import dashboardRoutes from './modules/dashboard/dashboard.route';
 
 import 'dotenv/config';
 
@@ -45,6 +46,7 @@ app.use('/contract', contractRouter);
 app.use('/transport-types', transportTypesRoutes);
 app.use('/payment-methods', paymentMethodsRoutes);
 app.use('/payment', paymentRoutes);
+app.use('/dashboard', dashboardRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/upload-s3', uploadS3Router);
 
