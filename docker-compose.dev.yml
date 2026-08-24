@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: vendamais
       POSTGRES_DB: vendamais_dev
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - vendamais_postgres_dev_data:/var/lib/postgresql/data
     restart: unless-stopped

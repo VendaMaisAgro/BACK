@@ -437,7 +437,7 @@ export class DashboardService {
     const windowEnd = months[months.length - 1].end;
     const saleFilterWhere = buildSaleFilterWhere(filters);
 
-    const [previstoSales, realizadoSales, completedPayments, periodSales, optionSales] = await Promise.all([
+    const [previstoSales, realizadoSales, completedPayments, periodSales, filterCatalog] = await Promise.all([
       this.prisma.saleData.findMany({
         where: { plannedDeliveryDate: { gte: windowStart, lt: windowEnd }, ...saleFilterWhere },
         select: {
@@ -461,7 +461,7 @@ export class DashboardService {
         select: { amount: true, updatedAt: true },
       }),
       this.getExecutivePeriodSales(windowStart, windowEnd, saleFilterWhere),
-      this.getOptionSales({ createdAt: { gte: windowStart, lt: windowEnd } }),
+      this.getFilterCatalog({ createdAt: { gte: windowStart, lt: windowEnd } }),
     ]);
 
     const previstoPorMes = new Map<string, number>();
@@ -522,7 +522,7 @@ export class DashboardService {
       },
       operacoes: { monthly: operacoesMonthly },
       counters: this.buildExecutiveCounters(periodSales, stageResults),
-      filterOptions: { ...this.buildProdutoCompradorVendedorOptions(optionSales), tiposOperacao: [] },
+      filterOptions: { ...filterCatalog, tiposOperacao: [] },
       faturamentoPorProduto: this.buildFaturamentoPorProduto(periodSales, filters),
       origemDestino: this.buildOrigemDestino(periodSales, filters),
       principaisCompradores: this.buildPrincipaisCompradores(periodSales),
@@ -572,38 +572,35 @@ export class DashboardService {
     });
   }
 
-  /** Base (sem os filtros produto/comprador/vendedor) pra popular os 3 primeiros dropdowns do front. */
-  /** Base de vendas (comprador + produto/vendedor de cada boughtProduct) pra popular dropdowns — reaproveitada pelo executive-overview (janela fixa de 12 meses) e pelo pipeline (período livre do date range picker). */
-  private async getOptionSales(where: Record<string, unknown>) {
-    return this.prisma.saleData.findMany({
-      where,
-      select: {
-        buyerId: true,
-        buyer: { select: { name: true } },
-        boughtProducts: {
-          select: { product: { select: { id: true, name: true, sellerId: true, seller: { select: { name: true } } } } },
-        },
-      },
-    });
-  }
+  /**
+   * Catálogo de opções pros dropdowns produto/comprador/vendedor — 3 consultas direcionadas (uma por
+   * entidade, via filtro de relação) em vez de carregar toda venda + boughtProducts + produto + vendedor
+   * do período só pra desduplicar em memória. Sem isso, num período sem filtro de data (ex.: pipeline sem
+   * startDate) o custo crescia com o histórico inteiro de vendas — e rodava de novo a cada página pedida,
+   * já que o controller chama isso em paralelo com list a cada request.
+   * `saleWhere` é o mesmo filtro (createdAt, produto/comprador/vendedor) aplicado nas 3, só que reescrito
+   * como filtro de relação (`some: saleWhere`) partindo de User/Product em vez de partir de SaleData.
+   */
+  private async getFilterCatalog(
+    saleWhere: Record<string, unknown>
+  ): Promise<Pick<ExecutiveFilterOptions, "produtos" | "compradores" | "vendedores">> {
+    const [compradores, produtos, vendedores] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { salesBuyer: { some: saleWhere } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.product.findMany({
+        where: { boughtProducts: { some: { saleData: saleWhere } } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.user.findMany({
+        where: { products: { some: { boughtProducts: { some: { saleData: saleWhere } } } } },
+        select: { id: true, name: true },
+      }),
+    ]);
 
-  private buildProdutoCompradorVendedorOptions(
-    sales: Awaited<ReturnType<DashboardService["getOptionSales"]>>
-  ): Pick<ExecutiveFilterOptions, "produtos" | "compradores" | "vendedores"> {
-    const produtos = new Map<string, string>();
-    const compradores = new Map<string, string>();
-    const vendedores = new Map<string, string>();
-
-    for (const sale of sales) {
-      compradores.set(sale.buyerId, sale.buyer.name);
-      for (const bp of sale.boughtProducts) {
-        produtos.set(bp.product.id, bp.product.name);
-        vendedores.set(bp.product.sellerId, bp.product.seller.name);
-      }
-    }
-
-    const toSortedOptions = (map: Map<string, string>): FilterOption[] =>
-      [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    const toSortedOptions = (rows: FilterOption[]): FilterOption[] =>
+      [...rows].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 
     return {
       produtos: toSortedOptions(produtos),
@@ -823,12 +820,8 @@ export class DashboardService {
 
   /** filterOptions do Pipeline: produto/comprador/vendedor no período (date range picker), + status prontos do funil/bloqueio. */
   async getPipelineFilterOptions(dateFilter: PipelineDateFilter = {}): Promise<PipelineFilterOptions> {
-    const sales = await this.getOptionSales(buildCreatedAtWhere(dateFilter));
-    return {
-      ...this.buildProdutoCompradorVendedorOptions(sales),
-      tiposOperacao: [],
-      status: PIPELINE_STATUS_FILTER_OPTIONS,
-    };
+    const catalog = await this.getFilterCatalog(buildCreatedAtWhere(dateFilter));
+    return { ...catalog, tiposOperacao: [], status: PIPELINE_STATUS_FILTER_OPTIONS };
   }
 
   /** Tally puro a partir de PipelineStageResult já calculados — reaproveitado pelo executive-overview

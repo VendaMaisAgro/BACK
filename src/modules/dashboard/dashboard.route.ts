@@ -177,10 +177,11 @@ router.get("/executive-overview", controller.getExecutiveOverview as RequestHand
  *       ("Aguardando Pagamento", "Liberado para Embarque" etc., ou "Bloqueada" quando aplicável) e dias na etapa atual.
  *       Paginada — statusCounts/terminal/funnel/counters/gargalos sempre consideram todas as vendas do período+filtros,
  *       list retorna só a página pedida.
- *       startDate/endDate filtram por createdAt (data do pedido). produto/comprador/vendedor filtram por
- *       boughtProducts (produto+vendedor precisam bater na mesma linha do carrinho). stage filtra só a list, pela
- *       etapa calculada (0-10) — use filterOptions.status pra montar esse valor sem hardcode. blocked=true filtra
- *       só a list, pra vendas com o selo "Bloqueada".
+ *       startDate/endDate filtram por createdAt (data do pedido). comprador filtra diretamente por
+ *       SaleData.buyerId; produto e vendedor filtram por boughtProducts e precisam bater na mesma linha
+ *       do carrinho (o produto X vendido pelo vendedor Y). stage filtra só a list, pela etapa calculada
+ *       (0-10) — use filterOptions.status pra montar esse valor sem hardcode. blocked=true filtra só a
+ *       list, pra vendas com o selo "Bloqueada".
  *     tags: [Dashboard]
  *     parameters:
  *       - in: query
