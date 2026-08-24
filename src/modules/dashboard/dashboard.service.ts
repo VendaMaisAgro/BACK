@@ -746,9 +746,12 @@ export class DashboardService {
   }
 
   /**
-   * Status por etapa (10 etapas + terminais Cancelado/Recusado) e funil cumulativo em 5 baldes.
-   * Faz um único scan leve (sem boughtProducts/Payment.amount) sobre as vendas do período filtrado —
-   * precisa ler todas porque a etapa é derivada em código (calculatePipelineStage), não uma coluna do banco.
+   * Status por etapa (10 etapas + terminais Cancelado/Recusado), funil cumulativo em 8 baldes
+   * (ver FUNNEL_BUCKETS) e os counters/gargalos derivados da mesma etapa (ver comentário inline abaixo,
+   * antes do loop que soma operacoesAtivas/finalizadas/aguardandoPagamento). Faz um único scan leve
+   * (sem boughtProducts/Payment.amount) sobre as vendas do período filtrado — precisa ler todas porque
+   * a etapa é derivada em código (calculatePipelineStage), não uma coluna do banco — mais 3 counts
+   * direcionados (semDocumentos/entregaAtrasada/bloqueadas).
    */
   async getPipelineSummary(
     filter: PipelineDateFilter & SaleFilters = {},
