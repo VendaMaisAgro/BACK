@@ -1,5 +1,5 @@
 import { Request, Response, RequestHandler } from "express";
-import { DashboardService } from "./dashboard.service";
+import { DashboardService, ALERT_CATEGORIAS, ALERT_CRITICIDADES, AlertCategoria, AlertCriticidade } from "./dashboard.service";
 
 const service = new DashboardService();
 
@@ -31,6 +31,12 @@ function parseStageListParam(raw: unknown): number[] | undefined | "invalid" {
 function parseOptionalStringParam(raw: unknown): string | undefined {
   if (typeof raw !== "string" || raw.trim() === "") return undefined;
   return raw;
+}
+
+/** Retorna undefined se ausente, o valor se estiver na lista permitida, ou "invalid" se presente e fora dela. */
+function parseEnumParam<T extends string>(raw: unknown, allowed: readonly T[]): T | undefined | "invalid" {
+  if (raw === undefined) return undefined;
+  return (allowed as readonly string[]).includes(raw as string) ? (raw as T) : "invalid";
 }
 
 /** Retorna undefined se ausente, o boolean se "true"/"false", ou "invalid" se presente e diferente disso. */
@@ -109,12 +115,30 @@ export class DashboardController {
   public getOperationalAlerts: RequestHandler = async (req: Request, res: Response): Promise<void> => {
     try {
       const limit = parsePositiveIntParam(req.query.limit);
+      const startDate = parseDateParam(req.query.startDate);
+      const endDate = parseDateParam(req.query.endDate);
+      const categoria = parseEnumParam<AlertCategoria>(req.query.categoria, ALERT_CATEGORIAS);
+      const criticidade = parseEnumParam<AlertCriticidade>(req.query.criticidade, ALERT_CRITICIDADES);
+      const parceiroId = parseOptionalStringParam(req.query.parceiro);
+
       if (limit === "invalid") {
         res.status(400).json({ error: "limit deve ser um número inteiro positivo" });
         return;
       }
+      if (startDate === "invalid" || endDate === "invalid") {
+        res.status(400).json({ error: "startDate e endDate devem ser datas válidas (ISO 8601)" });
+        return;
+      }
+      if (categoria === "invalid") {
+        res.status(400).json({ error: `categoria deve ser uma de: ${ALERT_CATEGORIAS.join(", ")}` });
+        return;
+      }
+      if (criticidade === "invalid") {
+        res.status(400).json({ error: `criticidade deve ser uma de: ${ALERT_CRITICIDADES.join(", ")}` });
+        return;
+      }
 
-      const result = await service.getOperationalAlerts({ limit });
+      const result = await service.getOperationalAlerts({ limit, startDate, endDate, categoria, criticidade, parceiroId });
       res.status(200).json(result);
     } catch (error: any) {
       console.error(error);
