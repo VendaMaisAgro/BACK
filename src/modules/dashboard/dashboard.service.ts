@@ -351,8 +351,18 @@ function semUploadDocumentosWhere(extra: Record<string, unknown> = {}): Record<s
 function entregaAtrasadaWhere(now: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { plannedDeliveryDate: { lt: now }, actualDeliveryDate: null, status: ACTIVE_SALE_STATUS_FILTER, ...extra };
 }
+/**
+ * paymentCompleted: false exclui vendas já totalmente pagas (etapa 9/10): o fluxo de criação de
+ * pagamento permite mais de uma tentativa, então uma venda paga pode ainda ter um Payment 'pending'
+ * mais antigo/alternativo — sem esse filtro, ela seria contada como vencida/bloqueada indevidamente.
+ */
 function pagamentoVencidoWhere(overdueCutoff: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { status: ACTIVE_SALE_STATUS_FILTER, Payment: { some: { status: "pending", createdAt: { lt: overdueCutoff } } }, ...extra };
+  return {
+    status: ACTIVE_SALE_STATUS_FILTER,
+    paymentCompleted: false,
+    Payment: { some: { status: "pending", createdAt: { lt: overdueCutoff } } },
+    ...extra,
+  };
 }
 
 const ALERT_TYPES = {
@@ -965,7 +975,10 @@ export class DashboardService {
 
     const items: PipelineListItem[] = sales.map((sale) => {
       const stageResult = calculatePipelineStage(sale, now);
-      const isBlocked = sale.Payment.some((p) => p.status === "pending" && p.createdAt < overdueCutoff);
+      // !sale.paymentCompleted: mesma exclusão de pagamentoVencidoWhere — uma venda já paga (etapa 9/10)
+      // pode ter um Payment 'pending' órfão de uma tentativa antiga/alternativa; sem isso ela apareceria
+      // como "Bloqueada" mesmo já finalizada.
+      const isBlocked = !sale.paymentCompleted && sale.Payment.some((p) => p.status === "pending" && p.createdAt < overdueCutoff);
       const products = sale.boughtProducts;
       const produto = products.length === 0
         ? "-"

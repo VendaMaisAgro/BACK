@@ -25,6 +25,8 @@ interface TestUserSpec {
   passEnvVar: string;
   role: "admin" | "buyer";
   label: string;
+  /** Identidade estável do registro de teste — NÃO o CPF, que vem do .env e pode mudar entre execuções. */
+  email: string;
 }
 
 async function upsertTestUser(spec: TestUserSpec): Promise<void> {
@@ -46,13 +48,20 @@ async function upsertTestUser(spec: TestUserSpec): Promise<void> {
   const cpf = formatToCPF(rawCpf);
   const hashedPassword = await bcrypt.hash(rawPass, 10);
 
+  /**
+   * Upsert pela identidade ESTÁVEL (email fixo por papel), não pelo CPF vindo do .env: se o CPF for
+   * trocado entre execuções, chavear por cpf faria o create() colidir no email único (que não mudou) —
+   * e pior, se o CPF informado já pertencesse a outro usuário real, o update() reatribuiria role/senha
+   * da conta de outra pessoa. Chaveando por email, uma troca de CPF só atualiza o cpf deste mesmo
+   * registro de teste; se esse CPF já pertencer a outro usuário, o unique constraint falha alto (correto).
+   */
   const user = await prisma.user.upsert({
-    where: { cpf },
-    update: { role: spec.role, valid: true, password: hashedPassword },
+    where: { email: spec.email },
+    update: { role: spec.role, valid: true, password: hashedPassword, cpf },
     create: {
       name: spec.label,
       phone_number: "11999999999",
-      email: `${spec.role}.teste@vendamais.local`,
+      email: spec.email,
       password: hashedPassword,
       cpf,
       role: spec.role,
@@ -67,8 +76,20 @@ async function upsertTestUser(spec: TestUserSpec): Promise<void> {
 async function main() {
   assertDevEnvironment();
 
-  await upsertTestUser({ cpfEnvVar: "ADM_USER", passEnvVar: "ADM_PASS", role: "admin", label: "Admin Teste" });
-  await upsertTestUser({ cpfEnvVar: "STANDARD_USER", passEnvVar: "STANDARD_PASS", role: "buyer", label: "Usuário Teste" });
+  await upsertTestUser({
+    cpfEnvVar: "ADM_USER",
+    passEnvVar: "ADM_PASS",
+    role: "admin",
+    label: "Admin Teste",
+    email: "admin.teste@vendamais.local",
+  });
+  await upsertTestUser({
+    cpfEnvVar: "STANDARD_USER",
+    passEnvVar: "STANDARD_PASS",
+    role: "buyer",
+    label: "Usuário Teste",
+    email: "usuario.teste@vendamais.local",
+  });
 }
 
 main()
