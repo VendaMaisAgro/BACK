@@ -14,6 +14,7 @@
     "create-admin": "ts-node scripts/create-admin.ts",
     "seed-units": "ts-node scripts/seed-selling-units.ts",
     "seed-sales": "ts-node scripts/seed-sales-data.ts",
+    "seed-admin": "ts-node scripts/seed-admin.ts",
     "seed": "prisma db seed",
     "pretest": "node -e \"const fs=require('fs');if(!fs.existsSync('.env.test')){console.error('\\nERRO: Arquivo .env.test não encontrado.\\nTestes não podem rodar sem um banco de dados dedicado para testes.\\nCrie o .env.test com a DATABASE_URL do banco de testes antes de continuar.\\n');process.exit(1)}\"",
     "test": "jest --passWithNoTests"

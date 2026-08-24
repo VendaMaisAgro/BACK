@@ -24,7 +24,8 @@ interface CountSeries {
   monthly: MonthlyValue[];
 }
 
-export interface ExecutiveOverviewFilters {
+/** Filtros de produto/comprador/vendedor/tipoOperacao — compartilhados entre executive-overview e pipeline. */
+export interface SaleFilters {
   produtoId?: string;
   compradorId?: string;
   vendedorId?: string;
@@ -45,7 +46,7 @@ export interface ExecutiveFilterOptions {
   produtos: FilterOption[];
   compradores: FilterOption[];
   vendedores: FilterOption[];
-  /** Sempre [] por enquanto — ver ExecutiveOverviewFilters.tipoOperacao. */
+  /** Sempre [] por enquanto — ver SaleFilters.tipoOperacao. */
   tiposOperacao: FilterOption[];
 }
 
@@ -137,7 +138,7 @@ const TOP_RANKING_SIZE = 5;
  * produto/vendedor precisam bater na MESMA linha de boughtProducts (o produto X vendido pelo vendedor Y),
  * por isso viram um único `some` combinado — dois `some` separados poderiam casar itens diferentes da venda.
  */
-function buildSaleFilterWhere(filters: ExecutiveOverviewFilters): Record<string, unknown> {
+function buildSaleFilterWhere(filters: SaleFilters): Record<string, unknown> {
   const where: Record<string, unknown> = {};
   if (filters.compradorId) where.buyerId = filters.compradorId;
   if (filters.produtoId || filters.vendedorId) {
@@ -159,20 +160,80 @@ function buildSaleFilterWhere(filters: ExecutiveOverviewFilters): Record<string,
  */
 function boughtProductMatchesFilters(
   bp: { productId: string; product: { sellerId: string } },
-  filters: ExecutiveOverviewFilters
+  filters: SaleFilters
 ): boolean {
   if (filters.produtoId && bp.productId !== filters.produtoId) return false;
   if (filters.vendedorId && bp.product.sellerId !== filters.vendedorId) return false;
   return true;
 }
 
+/**
+ * 8 baldes cumulativos (stage >= minStage) alinhados 1:1 com o "Funil de Operações" do mockup.
+ * "Liberado para Embarque" consolida as etapas internas 3-5 (liberação p/ colheita, colheita/embarque,
+ * pesagem+docs) num único marco visível ao cliente — o balde cumulativo já inclui as 3 automaticamente.
+ */
 const FUNNEL_BUCKETS = [
-  { key: "cadastro", label: "Cadastro", minStage: 1 },
-  { key: "pagamento", label: "Pagamento", minStage: 2 },
-  { key: "colheita", label: "Colheita", minStage: 3 },
-  { key: "em_transito", label: "Em Trânsito", minStage: 5 },
-  { key: "entrega", label: "Entrega", minStage: 7 },
+  { key: "contrato_criado", label: "Contrato Criado", minStage: 1 },
+  { key: "pagamento_validado", label: "Pagamento Validado", minStage: 2 },
+  { key: "liberado_embarque", label: "Liberado para Embarque", minStage: 3 },
+  { key: "em_transporte", label: "Em Transporte", minStage: 6 },
+  { key: "entregue", label: "Entregue", minStage: 7 },
+  { key: "aceite", label: "Aceite", minStage: 8 },
+  { key: "pagamento_liberado", label: "Pagamento Liberado", minStage: 9 },
+  { key: "finalizada", label: "Finalizada", minStage: 10 },
 ] as const;
+
+/**
+ * Mesma consolidação do funil aplicada ao status individual de cada operação (lista/tabela) — as
+ * etapas internas 3-5 mostram todas como "Liberado para Embarque". stage 1 é renomeado para
+ * "Aguardando Pagamento" (mais descritivo pra quem está olhando uma operação parada nessa etapa).
+ */
+const CONSOLIDATED_STAGE_LABELS: Record<number, string> = {
+  1: "Aguardando Pagamento",
+  2: "Pagamento Validado",
+  3: "Liberado para Embarque",
+  4: "Liberado para Embarque",
+  5: "Liberado para Embarque",
+  6: "Em Transporte",
+  7: "Entregue",
+  8: "Aceite",
+  9: "Pagamento Liberado",
+  10: "Finalizada",
+};
+
+/**
+ * "Bloqueada" é um selo visual sobre o status real (não uma etapa nova): a operação continua na sua
+ * etapa de fato, mas exibe "Bloqueada" quando tem pagamento pending vencido há mais de
+ * PENDING_PAYMENT_OVERDUE_DAYS dias (mesma regra de getOperationalAlerts.pagamentoVencido) — reaproveitada
+ * aqui em vez de inventar uma nova régua de "operação bloqueada".
+ */
+function displayStatusLabel(stageResult: ReturnType<typeof calculatePipelineStage>, isBlocked: boolean): string {
+  if (stageResult.stage === 0) return stageResult.label;
+  if (isBlocked) return "Bloqueada";
+  return CONSOLIDATED_STAGE_LABELS[stageResult.stage] ?? stageResult.label;
+}
+
+export interface StatusFilterOption {
+  value: string;
+  label: string;
+  /** Etapas internas (calculatePipelineStage) que esse status engloba — usar em ?stage=. */
+  stages?: number[];
+  /** Quando true, usar ?blocked=true em vez de stage (ver displayStatusLabel). */
+  blocked?: true;
+}
+
+/** Opções prontas pro dropdown "Status" do Pipeline — front monta ?stage=/?blocked= a partir daqui, sem hardcodar números de etapa. */
+export const PIPELINE_STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
+  { value: "aguardando_pagamento", label: "Aguardando Pagamento", stages: [1] },
+  { value: "pagamento_validado", label: "Pagamento Validado", stages: [2] },
+  { value: "liberado_embarque", label: "Liberado para Embarque", stages: [3, 4, 5] },
+  { value: "em_transporte", label: "Em Transporte", stages: [6] },
+  { value: "entregue", label: "Entregue", stages: [7] },
+  { value: "aceite", label: "Aceite", stages: [8] },
+  { value: "pagamento_liberado", label: "Pagamento Liberado", stages: [9] },
+  { value: "finalizada", label: "Finalizada", stages: [10] },
+  { value: "bloqueada", label: "Bloqueada", blocked: true },
+];
 
 export interface PipelineStatusCount {
   stage: number;
@@ -191,6 +252,7 @@ export interface PipelineListItem {
   id: string;
   orderNumber: number;
   produto: string;
+  comprador: string;
   vendedor: string;
   valor: number;
   status: string;
@@ -201,6 +263,34 @@ export interface PipelineSummary {
   statusCounts: PipelineStatusCount[];
   terminal: PipelineStatusCount[];
   funnel: PipelineFunnelBucket[];
+}
+
+export interface PipelineCounters {
+  operacoesAtivas: number;
+  finalizadas: number;
+  /** Etapa 1 (contrato criado, entrada ainda não confirmada) — mesma etapa exibida como "Aguardando Pagamento". */
+  aguardandoPagamento: number;
+  /** Ver displayStatusLabel — pagamento pending vencido há mais de PENDING_PAYMENT_OVERDUE_DAYS dias. */
+  bloqueadas: number;
+  taxaConversaoPercent: number;
+  /** ativas + finalizadas (denominador da taxa de conversão) — exclui Cancelado/Recusado. */
+  totalContratos: number;
+}
+
+export interface PipelineGargalos {
+  aguardandoPagamento: number;
+  bloqueadas: number;
+  semDocumentos: number;
+  entregaAtrasada: number;
+}
+
+export interface PipelineOverviewSummary extends PipelineSummary {
+  counters: PipelineCounters;
+  gargalos: PipelineGargalos;
+}
+
+export interface PipelineFilterOptions extends ExecutiveFilterOptions {
+  status: StatusFilterOption[];
 }
 
 export interface PipelineListPage {
@@ -241,6 +331,39 @@ const PENDING_PAYMENT_OVERDUE_DAYS = 3;
 const DEFAULT_ALERT_LIST_LIMIT = 50;
 const MAX_ALERT_LIST_LIMIT = 200;
 const ACTIVE_SALE_STATUS_FILTER = { notIn: ["Cancelado", "Recusado pelo vendedor"] };
+
+/**
+ * Predicados das 4 regras de alerta, extraídos de getOperationalAlerts pra serem reaproveitados também
+ * pelo Pipeline (gargalos/contadores) com os mesmos filtros de período/produto/comprador/vendedor da
+ * página — em vez de duplicar a lógica de negócio com um where escrito à mão em cada lugar.
+ */
+function semPagamentoAntesColheitaWhere(now: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { plannedHarvestDate: { lte: now }, downPaymentCompleted: false, status: ACTIVE_SALE_STATUS_FILTER, ...extra };
+}
+function semUploadDocumentosWhere(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    shippedAt: { not: null },
+    status: ACTIVE_SALE_STATUS_FILTER,
+    operationDocuments: { none: { docType: "nota_fiscal" } },
+    ...extra,
+  };
+}
+function entregaAtrasadaWhere(now: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { plannedDeliveryDate: { lt: now }, actualDeliveryDate: null, status: ACTIVE_SALE_STATUS_FILTER, ...extra };
+}
+/**
+ * paymentCompleted: false exclui vendas já totalmente pagas (etapa 9/10): o fluxo de criação de
+ * pagamento permite mais de uma tentativa, então uma venda paga pode ainda ter um Payment 'pending'
+ * mais antigo/alternativo — sem esse filtro, ela seria contada como vencida/bloqueada indevidamente.
+ */
+function pagamentoVencidoWhere(overdueCutoff: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    status: ACTIVE_SALE_STATUS_FILTER,
+    paymentCompleted: false,
+    Payment: { some: { status: "pending", createdAt: { lt: overdueCutoff } } },
+    ...extra,
+  };
+}
 
 const ALERT_TYPES = {
   semPagamentoAntesColheita: {
@@ -318,13 +441,13 @@ export class DashboardService {
    * Previsto agrupa pela data planejada de entrega (plannedDeliveryDate); Realizado agrupa pela
    * data efetiva (actualDeliveryDate para faturamento/operações, Payment.updatedAt para receita).
    */
-  async getExecutiveOverview(filters: ExecutiveOverviewFilters = {}, now: Date = new Date()): Promise<ExecutiveOverview> {
+  async getExecutiveOverview(filters: SaleFilters = {}, now: Date = new Date()): Promise<ExecutiveOverview> {
     const months = buildLast12Months(now);
     const windowStart = months[0].start;
     const windowEnd = months[months.length - 1].end;
     const saleFilterWhere = buildSaleFilterWhere(filters);
 
-    const [previstoSales, realizadoSales, completedPayments, periodSales, optionSales] = await Promise.all([
+    const [previstoSales, realizadoSales, completedPayments, periodSales, filterCatalog] = await Promise.all([
       this.prisma.saleData.findMany({
         where: { plannedDeliveryDate: { gte: windowStart, lt: windowEnd }, ...saleFilterWhere },
         select: {
@@ -348,7 +471,7 @@ export class DashboardService {
         select: { amount: true, updatedAt: true },
       }),
       this.getExecutivePeriodSales(windowStart, windowEnd, saleFilterWhere),
-      this.getExecutiveOptionSales(windowStart, windowEnd),
+      this.getFilterCatalog({ createdAt: { gte: windowStart, lt: windowEnd } }),
     ]);
 
     const previstoPorMes = new Map<string, number>();
@@ -409,7 +532,7 @@ export class DashboardService {
       },
       operacoes: { monthly: operacoesMonthly },
       counters: this.buildExecutiveCounters(periodSales, stageResults),
-      filterOptions: this.buildFilterOptions(optionSales),
+      filterOptions: { ...filterCatalog, tiposOperacao: [] },
       faturamentoPorProduto: this.buildFaturamentoPorProduto(periodSales, filters),
       origemDestino: this.buildOrigemDestino(periodSales, filters),
       principaisCompradores: this.buildPrincipaisCompradores(periodSales),
@@ -459,41 +582,40 @@ export class DashboardService {
     });
   }
 
-  /** Base (sem os filtros produto/comprador/vendedor) pra popular os 3 primeiros dropdowns do front. */
-  private async getExecutiveOptionSales(windowStart: Date, windowEnd: Date) {
-    return this.prisma.saleData.findMany({
-      where: { createdAt: { gte: windowStart, lt: windowEnd } },
-      select: {
-        buyerId: true,
-        buyer: { select: { name: true } },
-        boughtProducts: {
-          select: { product: { select: { id: true, name: true, sellerId: true, seller: { select: { name: true } } } } },
-        },
-      },
-    });
-  }
+  /**
+   * Catálogo de opções pros dropdowns produto/comprador/vendedor — 3 consultas direcionadas (uma por
+   * entidade, via filtro de relação) em vez de carregar toda venda + boughtProducts + produto + vendedor
+   * do período só pra desduplicar em memória. Sem isso, num período sem filtro de data (ex.: pipeline sem
+   * startDate) o custo crescia com o histórico inteiro de vendas — e rodava de novo a cada página pedida,
+   * já que o controller chama isso em paralelo com list a cada request.
+   * `saleWhere` é o mesmo filtro (createdAt, produto/comprador/vendedor) aplicado nas 3, só que reescrito
+   * como filtro de relação (`some: saleWhere`) partindo de User/Product em vez de partir de SaleData.
+   */
+  private async getFilterCatalog(
+    saleWhere: Record<string, unknown>
+  ): Promise<Pick<ExecutiveFilterOptions, "produtos" | "compradores" | "vendedores">> {
+    const [compradores, produtos, vendedores] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { salesBuyer: { some: saleWhere } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.product.findMany({
+        where: { boughtProducts: { some: { saleData: saleWhere } } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.user.findMany({
+        where: { products: { some: { boughtProducts: { some: { saleData: saleWhere } } } } },
+        select: { id: true, name: true },
+      }),
+    ]);
 
-  private buildFilterOptions(sales: Awaited<ReturnType<DashboardService["getExecutiveOptionSales"]>>): ExecutiveFilterOptions {
-    const produtos = new Map<string, string>();
-    const compradores = new Map<string, string>();
-    const vendedores = new Map<string, string>();
-
-    for (const sale of sales) {
-      compradores.set(sale.buyerId, sale.buyer.name);
-      for (const bp of sale.boughtProducts) {
-        produtos.set(bp.product.id, bp.product.name);
-        vendedores.set(bp.product.sellerId, bp.product.seller.name);
-      }
-    }
-
-    const toSortedOptions = (map: Map<string, string>): FilterOption[] =>
-      [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    const toSortedOptions = (rows: FilterOption[]): FilterOption[] =>
+      [...rows].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 
     return {
       produtos: toSortedOptions(produtos),
       compradores: toSortedOptions(compradores),
       vendedores: toSortedOptions(vendedores),
-      tiposOperacao: [],
     };
   }
 
@@ -530,7 +652,7 @@ export class DashboardService {
   /** Agrupa por productId (Product.name não é @unique — nomes iguais em produtos diferentes não podem ser somados juntos). */
   private buildFaturamentoPorProduto(
     sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
-    filters: ExecutiveOverviewFilters
+    filters: SaleFilters
   ): ProductRevenue[] {
     const totals = new Map<string, { nome: string; valor: number }>();
     for (const sale of sales) {
@@ -559,7 +681,7 @@ export class DashboardService {
    */
   private buildOrigemDestino(
     sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
-    filters: ExecutiveOverviewFilters
+    filters: SaleFilters
   ): RouteAggregate[] {
     const routes = new Map<string, RouteAggregate>();
 
@@ -600,7 +722,7 @@ export class DashboardService {
 
   private buildPrincipaisVendedores(
     sales: Awaited<ReturnType<DashboardService["getExecutivePeriodSales"]>>,
-    filters: ExecutiveOverviewFilters
+    filters: SaleFilters
   ): PartyRanking[] {
     const totals = new Map<string, { nome: string; valor: number }>();
     for (const sale of sales) {
@@ -634,29 +756,85 @@ export class DashboardService {
   }
 
   /**
-   * Status por etapa (10 etapas + terminais Cancelado/Recusado) e funil cumulativo em 5 baldes.
-   * Faz um único scan leve (sem boughtProducts/Payment.amount) sobre as vendas do período filtrado —
-   * precisa ler todas porque a etapa é derivada em código (calculatePipelineStage), não uma coluna do banco.
+   * Status por etapa (10 etapas + terminais Cancelado/Recusado), funil cumulativo em 8 baldes
+   * (ver FUNNEL_BUCKETS) e os counters/gargalos derivados da mesma etapa (ver comentário inline abaixo,
+   * antes do loop que soma operacoesAtivas/finalizadas/aguardandoPagamento). Faz um único scan leve
+   * (sem boughtProducts/Payment.amount) sobre as vendas do período filtrado — precisa ler todas porque
+   * a etapa é derivada em código (calculatePipelineStage), não uma coluna do banco — mais 3 counts
+   * direcionados (semDocumentos/entregaAtrasada/bloqueadas).
    */
-  async getPipelineSummary(filter: PipelineDateFilter = {}, now: Date = new Date()): Promise<PipelineSummary> {
-    const sales = await this.prisma.saleData.findMany({
-      where: buildCreatedAtWhere(filter),
-      select: {
-        status: true,
-        createdAt: true,
-        statusChangedAt: true,
-        downPaymentCompleted: true,
-        paymentCompleted: true,
-        shippedAt: true,
-        arrivedAt: true,
-        actualDeliveryDate: true,
-        weightDocumentId: true,
-        Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
-      },
-    });
+  async getPipelineSummary(
+    filter: PipelineDateFilter & SaleFilters = {},
+    now: Date = new Date()
+  ): Promise<PipelineOverviewSummary> {
+    const extraWhere = { ...buildCreatedAtWhere(filter), ...buildSaleFilterWhere(filter) };
+    const overdueCutoff = new Date(now.getTime() - PENDING_PAYMENT_OVERDUE_DAYS * 86_400_000);
+
+    const [sales, semDocumentosCount, entregaAtrasadaCount, bloqueadasCount] = await Promise.all([
+      this.prisma.saleData.findMany({
+        where: extraWhere,
+        select: {
+          status: true,
+          createdAt: true,
+          statusChangedAt: true,
+          downPaymentCompleted: true,
+          paymentCompleted: true,
+          shippedAt: true,
+          arrivedAt: true,
+          actualDeliveryDate: true,
+          weightDocumentId: true,
+          Payment: { where: { status: "completed" }, select: { phase: true, status: true, updatedAt: true } },
+        },
+      }),
+      this.prisma.saleData.count({ where: semUploadDocumentosWhere(extraWhere) }),
+      this.prisma.saleData.count({ where: entregaAtrasadaWhere(now, extraWhere) }),
+      this.prisma.saleData.count({ where: pagamentoVencidoWhere(overdueCutoff, extraWhere) }),
+    ]);
 
     const stageResults = sales.map((sale) => calculatePipelineStage(sale, now));
-    return this.tallyStageResults(stageResults);
+    const { statusCounts, terminal, funnel } = this.tallyStageResults(stageResults);
+
+    // ativa/finalizada/aguardandoPagamento reaproveitam a MESMA etapa do pipeline (calculatePipelineStage) —
+    // stage 10 = finalizada, stage 1 = aguardando pagamento (entrada ainda não confirmada), 2-9 = ativa "em fluxo".
+    // Cancelado/Recusado (stage 0) ficam de fora, igual ao funil/statusCounts.
+    let operacoesAtivas = 0;
+    let finalizadas = 0;
+    let aguardandoPagamento = 0;
+    for (const stageResult of stageResults) {
+      if (stageResult.stage === 10) finalizadas += 1;
+      else if (stageResult.stage !== 0) {
+        operacoesAtivas += 1;
+        if (stageResult.stage === 1) aguardandoPagamento += 1;
+      }
+    }
+    const totalContratos = operacoesAtivas + finalizadas;
+    const taxaConversaoPercent = totalContratos > 0 ? round1((finalizadas / totalContratos) * 100) : 0;
+
+    return {
+      statusCounts,
+      terminal,
+      funnel,
+      counters: {
+        operacoesAtivas,
+        finalizadas,
+        aguardandoPagamento,
+        bloqueadas: bloqueadasCount,
+        taxaConversaoPercent,
+        totalContratos,
+      },
+      gargalos: {
+        aguardandoPagamento,
+        bloqueadas: bloqueadasCount,
+        semDocumentos: semDocumentosCount,
+        entregaAtrasada: entregaAtrasadaCount,
+      },
+    };
+  }
+
+  /** filterOptions do Pipeline: produto/comprador/vendedor no período (date range picker), + status prontos do funil/bloqueio. */
+  async getPipelineFilterOptions(dateFilter: PipelineDateFilter = {}): Promise<PipelineFilterOptions> {
+    const catalog = await this.getFilterCatalog(buildCreatedAtWhere(dateFilter));
+    return { ...catalog, tiposOperacao: [], status: PIPELINE_STATUS_FILTER_OPTIONS };
   }
 
   /** Tally puro a partir de PipelineStageResult já calculados — reaproveitado pelo executive-overview
@@ -698,12 +876,17 @@ export class DashboardService {
    * Sem filtro de etapa, a paginação continua direta no banco (take/skip), sem esse scan extra.
    */
   async getPipelineList(
-    params: { page?: number; pageSize?: number; stage?: number[] } & PipelineDateFilter = {},
+    params: { page?: number; pageSize?: number; stage?: number[]; blocked?: boolean } & PipelineDateFilter & SaleFilters = {},
     now: Date = new Date()
   ): Promise<PipelineListPage> {
     const page = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, params.pageSize ?? DEFAULT_PAGE_SIZE));
-    const createdAtWhere = buildCreatedAtWhere(params);
+    const overdueCutoff = new Date(now.getTime() - PENDING_PAYMENT_OVERDUE_DAYS * 86_400_000);
+    const saleFilterWhere = buildSaleFilterWhere(params);
+    // blocked é um predicado real do banco (Payment pending vencido) — some tranquilamente com os
+    // demais filtros, ao contrário de stage (que é derivado em código e por isso precisa do scan leve abaixo).
+    const blockedWhere = params.blocked ? pagamentoVencidoWhere(overdueCutoff) : {};
+    const createdAtWhere = { ...buildCreatedAtWhere(params), ...saleFilterWhere, ...blockedWhere };
 
     const heavySelect = {
       id: true,
@@ -719,13 +902,17 @@ export class DashboardService {
       weightDocumentId: true,
       transportValue: true,
       adjustedContractTotal: true,
+      buyerId: true,
+      buyer: { select: { name: true } },
       boughtProducts: {
         select: {
           value: true,
           product: { select: { name: true, seller: { select: { name: true } } } },
         },
       },
-      Payment: { where: { status: "completed" as const }, select: { phase: true, status: true, updatedAt: true } },
+      // Sem filtro por status aqui (ao contrário do summary): precisamos também dos pending pra
+      // decidir o selo "Bloqueada" por linha (ver displayStatusLabel).
+      Payment: { select: { phase: true, status: true, updatedAt: true, createdAt: true } },
     } as const;
 
     let total: number;
@@ -736,12 +923,13 @@ export class DashboardService {
 
       // Sem startDate, o scan leve fica sem limite superior de idade — impõe uma janela máxima
       // pra manter o comportamento estável independente do volume de vendas.
-      const stageFilterWhere = params.startDate
-        ? createdAtWhere
+      const dateWhere = params.startDate
+        ? buildCreatedAtWhere(params)
         : buildCreatedAtWhere({
             startDate: new Date(now.getTime() - MAX_STAGE_FILTER_WINDOW_DAYS * 86_400_000),
             endDate: params.endDate,
           });
+      const stageFilterWhere = { ...dateWhere, ...saleFilterWhere, ...blockedWhere };
 
       // stage não depende de Payment (calculatePipelineStage só usa Payment para enteredAt/daysInStage,
       // que aqui não são lidos) — omitir a relação evita I/O e payload desnecessários neste scan.
@@ -787,6 +975,10 @@ export class DashboardService {
 
     const items: PipelineListItem[] = sales.map((sale) => {
       const stageResult = calculatePipelineStage(sale, now);
+      // !sale.paymentCompleted: mesma exclusão de pagamentoVencidoWhere — uma venda já paga (etapa 9/10)
+      // pode ter um Payment 'pending' órfão de uma tentativa antiga/alternativa; sem isso ela apareceria
+      // como "Bloqueada" mesmo já finalizada.
+      const isBlocked = !sale.paymentCompleted && sale.Payment.some((p) => p.status === "pending" && p.createdAt < overdueCutoff);
       const products = sale.boughtProducts;
       const produto = products.length === 0
         ? "-"
@@ -800,9 +992,10 @@ export class DashboardService {
         id: sale.id,
         orderNumber: sale.orderNumber,
         produto,
+        comprador: sale.buyer.name,
         vendedor,
         valor: round2(contractTotalOf(sale)),
-        status: stageResult.label,
+        status: displayStatusLabel(stageResult, isBlocked),
         diasEtapa: stageResult.daysInStage,
       };
     });
@@ -823,25 +1016,10 @@ export class DashboardService {
     const limit = Math.min(MAX_ALERT_LIST_LIMIT, Math.max(1, params.limit ?? DEFAULT_ALERT_LIST_LIMIT));
     const overdueCutoff = new Date(now.getTime() - PENDING_PAYMENT_OVERDUE_DAYS * 86_400_000);
 
-    const semPagamentoWhere = {
-      plannedHarvestDate: { lte: now },
-      downPaymentCompleted: false,
-      status: ACTIVE_SALE_STATUS_FILTER,
-    };
-    const semUploadWhere = {
-      shippedAt: { not: null },
-      status: ACTIVE_SALE_STATUS_FILTER,
-      operationDocuments: { none: { docType: "nota_fiscal" } },
-    };
-    const entregaAtrasadaWhere = {
-      plannedDeliveryDate: { lt: now },
-      actualDeliveryDate: null,
-      status: ACTIVE_SALE_STATUS_FILTER,
-    };
-    const pagamentoVencidoWhere = {
-      status: ACTIVE_SALE_STATUS_FILTER,
-      Payment: { some: { status: "pending", createdAt: { lt: overdueCutoff } } },
-    };
+    const semPagamentoWhere = semPagamentoAntesColheitaWhere(now);
+    const semUploadWhere = semUploadDocumentosWhere();
+    const entregaAtrasadaWhereObj = entregaAtrasadaWhere(now);
+    const pagamentoVencidoWhereObj = pagamentoVencidoWhere(overdueCutoff);
 
     const saleIdCols = { select: { id: true, orderNumber: true } };
 
@@ -855,10 +1033,10 @@ export class DashboardService {
       this.prisma.saleData.findMany({ where: semPagamentoWhere, orderBy: { plannedHarvestDate: "asc" }, take: limit, ...saleIdCols }),
       this.prisma.saleData.count({ where: semUploadWhere }),
       this.prisma.saleData.findMany({ where: semUploadWhere, orderBy: { shippedAt: "asc" }, take: limit, ...saleIdCols }),
-      this.prisma.saleData.count({ where: entregaAtrasadaWhere }),
-      this.prisma.saleData.findMany({ where: entregaAtrasadaWhere, orderBy: { plannedDeliveryDate: "asc" }, take: limit, ...saleIdCols }),
-      this.prisma.saleData.count({ where: pagamentoVencidoWhere }),
-      this.prisma.saleData.findMany({ where: pagamentoVencidoWhere, orderBy: { orderNumber: "asc" }, take: limit, ...saleIdCols }),
+      this.prisma.saleData.count({ where: entregaAtrasadaWhereObj }),
+      this.prisma.saleData.findMany({ where: entregaAtrasadaWhereObj, orderBy: { plannedDeliveryDate: "asc" }, take: limit, ...saleIdCols }),
+      this.prisma.saleData.count({ where: pagamentoVencidoWhereObj }),
+      this.prisma.saleData.findMany({ where: pagamentoVencidoWhereObj, orderBy: { orderNumber: "asc" }, take: limit, ...saleIdCols }),
     ]);
 
     const counts: OperationalAlertCounts = {
