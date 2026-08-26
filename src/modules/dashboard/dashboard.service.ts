@@ -1339,8 +1339,18 @@ export class DashboardService {
     // status excluído direto na query: Cancelado/Recusado sempre dão stage 0 (calculatePipelineStage),
     // então entrariam e sairiam do filtro de qualquer forma — excluir aqui evita ler/trazer essas linhas
     // à toa quando não há filtro de período/parceiro (onde o volume pode ser grande).
+    // Sem createdAt explícito (startDate/endDate ausentes), limita aos últimos MAX_STAGE_FILTER_WINDOW_DAYS
+    // dias — mesma janela de segurança que o scan leve de stage do Pipeline já usa (getPipelineList) pro
+    // mesmo problema: sem isso, o índice de saúde vira um scan do histórico inteiro de vendas. Uma
+    // operação "ativa" (etapa 1-9) genuinamente parada por mais tempo que isso é caso raro — fica de
+    // fora da conta (numerador e denominador) em vez de forçar o scan completo.
+    const hasExplicitPeriod = "createdAt" in saleWhere;
+    const boundedSaleWhere = hasExplicitPeriod
+      ? saleWhere
+      : { ...saleWhere, createdAt: { gte: new Date(now.getTime() - MAX_STAGE_FILTER_WINDOW_DAYS * 86_400_000) } };
+
     const sales = await this.prisma.saleData.findMany({
-      where: { ...saleWhere, status: ACTIVE_SALE_STATUS_FILTER },
+      where: { ...boundedSaleWhere, status: ACTIVE_SALE_STATUS_FILTER },
       select: {
         id: true,
         status: true,
@@ -1377,12 +1387,27 @@ export class DashboardService {
    */
   private async computeEvolucaoMensal(
     now: Date,
+    overdueCutoff: Date,
     activeRules: AlertRuleKey[],
-    openRowsByRule: Map<AlertRuleKey, AlertTriggerRow[]>,
     parceiroWhere: Record<string, unknown>
   ): Promise<AlertMonthlyPoint[]> {
     const months = buildLastMonths(now, EVOLUTION_MONTHS);
     const saleWhereForResolved = { ...parceiroWhere, status: ACTIVE_SALE_STATUS_FILTER };
+
+    // Retrospectiva FIXA de 6 meses — busca as linhas abertas de novo, com o MESMO filtro de parceiro
+    // da chamada mas SEM o createdAt de startDate/endDate (que é ad-hoc da página). Reaproveitar o
+    // openRowsByRule do resto do endpoint faria criticos/medios encolherem junto com o filtro de
+    // período, contradizendo a doc do endpoint (evolucaoMensal é pra ser independente disso).
+    const ruleWhereForEvolution: Record<AlertRuleKey, Record<string, unknown>> = {
+      semPagamentoAntesColheita: semPagamentoAntesColheitaWhere(now, parceiroWhere),
+      documentosPendentes: documentosPendentesWhere(parceiroWhere),
+      entregaAtrasada: entregaAtrasadaWhere(now, parceiroWhere),
+      pagamentoVencido: pagamentoVencidoWhere(overdueCutoff, parceiroWhere),
+    };
+    const openRowsEntries = await Promise.all(
+      activeRules.map(async (rule) => [rule, await this.fetchAlertTriggerRows(rule, ruleWhereForEvolution[rule])] as const)
+    );
+    const openRowsByRule = new Map(openRowsEntries);
 
     return Promise.all(
       months.map(async ({ key, label, start, end }) => {
@@ -1501,7 +1526,7 @@ export class DashboardService {
       percentual: porCategoriaTotal > 0 ? round1((count / porCategoriaTotal) * 100) : 0,
     }));
 
-    const evolucaoMensal = await this.computeEvolucaoMensal(now, activeRules, openRowsByRule, parceiroWhere);
+    const evolucaoMensal = await this.computeEvolucaoMensal(now, overdueCutoff, activeRules, parceiroWhere);
 
     // Ordena pelas linhas LEVES (sem buscar relação pesada nenhuma) — criticidade primeiro, e dentro da
     // mesma criticidade, MAIOR diasEmAberto primeiro (quem está aberto há mais tempo é mais urgente numa

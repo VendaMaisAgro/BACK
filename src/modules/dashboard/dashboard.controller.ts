@@ -11,8 +11,9 @@ function parsePositiveIntParam(raw: unknown): number | undefined | "invalid" {
 }
 
 /** Retorna undefined se ausente, a Date se válida, ou "invalid" se presente e não parseável. */
+/** "" (ex.: ?startDate= com o campo limpo no front) é tratado como ausente, não como data inválida. */
 function parseDateParam(raw: unknown): Date | undefined | "invalid" {
-  if (raw === undefined) return undefined;
+  if (raw === undefined || raw === "") return undefined;
   const date = new Date(raw as string);
   return Number.isNaN(date.getTime()) ? "invalid" : date;
 }
