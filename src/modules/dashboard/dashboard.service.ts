@@ -1102,11 +1102,30 @@ export class DashboardService {
     return { items, page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
   }
 
-  /** Dataset base de cada regra de alerta — 1 venda = 1 linha, com tudo que buildAlertItems/pickAlertTriggerDate/buildAlertDescricao precisam pras 4 regras (leve sobrecarga de select pra manter um único shape). */
-  private async fetchAlertRows(where: Record<string, unknown>) {
+  /**
+   * Dataset LEVE de cada regra — só id + os campos de data-gatilho, sem relações pesadas (buyer,
+   * boughtProducts, operationDocuments). Usado pra counts/criticos-medios/porCategoria/evolucaoMensal/
+   * alertedSaleIds, que precisam de TODAS as linhas abertas mas não de detalhe nenhum — sem `take`
+   * porque essas agregações genuinamente precisam do total, mas o select mínimo evita o scan pesado
+   * (era o ponto problemático da versão anterior: buscava as relações completas pra cada linha aberta).
+   */
+  private async fetchAlertTriggerRows(where: Record<string, unknown>) {
     return this.prisma.saleData.findMany({
       where,
-      orderBy: { orderNumber: "asc" },
+      select: {
+        id: true,
+        plannedHarvestDate: true,
+        shippedAt: true,
+        plannedDeliveryDate: true,
+        Payment: { where: { status: "pending" }, select: { createdAt: true }, orderBy: { createdAt: "asc" }, take: 1 },
+      },
+    });
+  }
+
+  /** Dataset PESADO (buyer/boughtProducts/operationDocuments/weightDocumentId) — só pros ids que efetivamente entram em list.items (no máximo `limit`), nunca pro dataset aberto inteiro. */
+  private async fetchAlertDetailRows(ids: string[]) {
+    return this.prisma.saleData.findMany({
+      where: { id: { in: ids } },
       select: {
         id: true,
         orderNumber: true,
@@ -1123,10 +1142,10 @@ export class DashboardService {
     });
   }
 
-  /** Data em que a condição do alerta passou a valer — base de diasEmAberto e do bucket mensal em evolucaoMensal. */
+  /** Data em que a condição do alerta passou a valer — base de diasEmAberto e do bucket mensal em evolucaoMensal. Aceita linha leve ou pesada (mesmos campos de data em ambas). */
   private pickAlertTriggerDate(
     rule: AlertRuleKey,
-    row: Awaited<ReturnType<DashboardService["fetchAlertRows"]>>[number]
+    row: Awaited<ReturnType<DashboardService["fetchAlertTriggerRows"]>>[number]
   ): Date {
     switch (rule) {
       case "semPagamentoAntesColheita":
@@ -1143,7 +1162,7 @@ export class DashboardService {
 
   private buildAlertDescricao(
     rule: AlertRuleKey,
-    row: Awaited<ReturnType<DashboardService["fetchAlertRows"]>>[number],
+    row: Awaited<ReturnType<DashboardService["fetchAlertDetailRows"]>>[number],
     triggerDate: Date
   ): string {
     const fmt = (d: Date) => d.toLocaleDateString("pt-BR", { timeZone: "UTC" });
@@ -1164,33 +1183,31 @@ export class DashboardService {
     }
   }
 
-  private sellerNamesOfAlertRow(row: Awaited<ReturnType<DashboardService["fetchAlertRows"]>>[number]): string {
+  private sellerNamesOfAlertRow(row: Awaited<ReturnType<DashboardService["fetchAlertDetailRows"]>>[number]): string {
     const names = [...new Set(row.boughtProducts.map((bp) => bp.product.seller.name))];
     return names.length === 0 ? "-" : names.length === 1 ? names[0] : "Múltiplos vendedores";
   }
 
-  private buildAlertItems(
+  private buildAlertItem(
     rule: AlertRuleKey,
-    rows: Awaited<ReturnType<DashboardService["fetchAlertRows"]>>,
+    row: Awaited<ReturnType<DashboardService["fetchAlertDetailRows"]>>[number],
     now: Date
-  ): OperationalAlertItem[] {
+  ): OperationalAlertItem {
     const meta = ALERT_RULE_META[rule];
-    return rows.map((row) => {
-      const triggerDate = this.pickAlertTriggerDate(rule, row);
-      const parceiro = meta.responsavel === "Comprador" ? row.buyer.name : this.sellerNamesOfAlertRow(row);
-      return {
-        id: row.id,
-        orderNumber: row.orderNumber,
-        categoria: meta.categoria,
-        criticidade: meta.criticidade,
-        parceiro,
-        descricao: this.buildAlertDescricao(rule, row, triggerDate),
-        dataHora: triggerDate.toISOString(),
-        diasEmAberto: daysBetween(triggerDate, now),
-        acao: meta.acao,
-        status: "Aberto" as const,
-      };
-    });
+    const triggerDate = this.pickAlertTriggerDate(rule, row);
+    const parceiro = meta.responsavel === "Comprador" ? row.buyer.name : this.sellerNamesOfAlertRow(row);
+    return {
+      id: row.id,
+      orderNumber: row.orderNumber,
+      categoria: meta.categoria,
+      criticidade: meta.criticidade,
+      parceiro,
+      descricao: this.buildAlertDescricao(rule, row, triggerDate),
+      dataHora: triggerDate.toISOString(),
+      diasEmAberto: daysBetween(triggerDate, now),
+      acao: meta.acao,
+      status: "Aberto" as const,
+    };
   }
 
   /**
@@ -1208,6 +1225,8 @@ export class DashboardService {
   ): Promise<number> {
     switch (rule) {
       case "semPagamentoAntesColheita": {
+        // Payment não é único por venda (down_payment + full, ou reprocessamentos) — dedup por saleId,
+        // senão uma venda com mais de um Payment completed no período conta como "resolvida" várias vezes.
         const rows = await this.prisma.payment.findMany({
           where: {
             phase: { in: ["down_payment", "full"] },
@@ -1215,16 +1234,26 @@ export class DashboardService {
             updatedAt: { gte: windowStart, lt: windowEnd },
             sale: saleWhere,
           },
-          select: { updatedAt: true, sale: { select: { plannedHarvestDate: true } } },
+          select: { saleId: true, updatedAt: true, sale: { select: { plannedHarvestDate: true } } },
         });
-        return rows.filter((p) => p.sale.plannedHarvestDate && p.updatedAt >= p.sale.plannedHarvestDate).length;
+        const resolvedSaleIds = new Set(
+          rows.filter((p) => p.sale.plannedHarvestDate && p.updatedAt >= p.sale.plannedHarvestDate).map((p) => p.saleId)
+        );
+        return resolvedSaleIds.size;
       }
       case "documentosPendentes": {
+        // documentosPendentesWhere cobre nota_fiscal E o comprovante de pesagem (ticket_balanca, o
+        // OperationDocument por trás de weightDocumentId — ver sales.service.ts) — a resolução precisa
+        // considerar os dois tipos. Dedup por saleId: nada garante um único documento do mesmo tipo por
+        // venda (reenvio de NF, por ex.), então sem o Set uma venda pode "resolver" mais de uma vez.
         const rows = await this.prisma.operationDocument.findMany({
-          where: { docType: "nota_fiscal", uploadedAt: { gte: windowStart, lt: windowEnd }, sale: saleWhere },
-          select: { uploadedAt: true, sale: { select: { shippedAt: true } } },
+          where: { docType: { in: ["nota_fiscal", "ticket_balanca"] }, uploadedAt: { gte: windowStart, lt: windowEnd }, sale: saleWhere },
+          select: { saleId: true, uploadedAt: true, sale: { select: { shippedAt: true } } },
         });
-        return rows.filter((d) => d.sale.shippedAt && d.uploadedAt > d.sale.shippedAt).length;
+        const resolvedSaleIds = new Set(
+          rows.filter((d) => d.sale.shippedAt && d.uploadedAt > d.sale.shippedAt).map((d) => d.saleId)
+        );
+        return resolvedSaleIds.size;
       }
       case "entregaAtrasada": {
         const rows = await this.prisma.saleData.findMany({
@@ -1234,11 +1263,15 @@ export class DashboardService {
         return rows.filter((s) => s.actualDeliveryDate! > s.plannedDeliveryDate!).length;
       }
       case "pagamentoVencido": {
+        // Mesmo motivo de semPagamentoAntesColheita: dedup por saleId contra múltiplos Payment completed.
         const rows = await this.prisma.payment.findMany({
           where: { status: "completed", updatedAt: { gte: windowStart, lt: windowEnd }, sale: saleWhere },
-          select: { createdAt: true, updatedAt: true },
+          select: { saleId: true, createdAt: true, updatedAt: true },
         });
-        return rows.filter((p) => diffInDays(p.createdAt, p.updatedAt) > PENDING_PAYMENT_OVERDUE_DAYS).length;
+        const resolvedSaleIds = new Set(
+          rows.filter((p) => diffInDays(p.createdAt, p.updatedAt) > PENDING_PAYMENT_OVERDUE_DAYS).map((p) => p.saleId)
+        );
+        return resolvedSaleIds.size;
       }
     }
   }
@@ -1257,8 +1290,11 @@ export class DashboardService {
     alertedSaleIds: Set<string>,
     now: Date
   ): Promise<number | null> {
+    // status excluído direto na query: Cancelado/Recusado sempre dão stage 0 (calculatePipelineStage),
+    // então entrariam e sairiam do filtro de qualquer forma — excluir aqui evita ler/trazer essas linhas
+    // à toa quando não há filtro de período/parceiro (onde o volume pode ser grande).
     const sales = await this.prisma.saleData.findMany({
-      where: saleWhere,
+      where: { ...saleWhere, status: ACTIVE_SALE_STATUS_FILTER },
       select: {
         id: true,
         status: true,
@@ -1296,7 +1332,7 @@ export class DashboardService {
   private async computeEvolucaoMensal(
     now: Date,
     activeRules: AlertRuleKey[],
-    openRowsByRule: Map<AlertRuleKey, Awaited<ReturnType<DashboardService["fetchAlertRows"]>>>,
+    openRowsByRule: Map<AlertRuleKey, Awaited<ReturnType<DashboardService["fetchAlertTriggerRows"]>>>,
     parceiroWhere: Record<string, unknown>
   ): Promise<AlertMonthlyPoint[]> {
     const months = buildLastMonths(now, EVOLUTION_MONTHS);
@@ -1331,7 +1367,10 @@ export class DashboardService {
    * entregaAtrasada, pagamentoVencido) + semTermoAditivo em standby (sempre 0 — ver resumo de
    * pendência entregue ao time). categoria/criticidade filtram QUAIS regras entram na conta (fixas por
    * tipo de regra, não por venda); período/parceiro filtram as vendas de cada regra.
-   * saudeOperacionalPercent fica null (standby — sem fórmula definida, ver resumo de pendência).
+   * saudeOperacionalPercent é calculado por computeSaudeOperacionalPercent (null só quando não há
+   * nenhuma operação ativa no escopo filtrado — ver o comentário daquele método).
+   * A lista final é buscada em duas fases (fetchAlertTriggerRows leve pra todas as linhas abertas,
+   * fetchAlertDetailRows pesado só pros ids que entram em list.items) — ver comentário de cada uma.
    */
   async getOperationalAlerts(
     params: { limit?: number } & PipelineDateFilter & AlertFilters = {},
@@ -1359,7 +1398,7 @@ export class DashboardService {
     };
 
     const openRowsEntries = await Promise.all(
-      activeRules.map(async (rule) => [rule, await this.fetchAlertRows(ruleWhere[rule])] as const)
+      activeRules.map(async (rule) => [rule, await this.fetchAlertTriggerRows(ruleWhere[rule])] as const)
     );
     const openRowsByRule = new Map(openRowsEntries);
 
@@ -1380,9 +1419,11 @@ export class DashboardService {
       else if (meta.criticidade === "Médio") medios += count;
     }
 
-    // Sem período informado, "resolvidos" sem limite de tempo não tem leitura útil — default 30 dias.
-    const resolvedWindowStart = params.startDate ?? new Date(now.getTime() - DEFAULT_RESOLVED_WINDOW_DAYS * 86_400_000);
+    // Sem startDate, a janela termina em endDate (ou now, se nenhum dos dois vier) e começa
+    // DEFAULT_RESOLVED_WINDOW_DAYS antes DESSE fim — nunca "now - 30 dias" fixo, senão uma consulta só
+    // com endDate no passado fica com uma janela que não termina em endDate (incoerente).
     const resolvedWindowEnd = params.endDate ?? now;
+    const resolvedWindowStart = params.startDate ?? new Date(resolvedWindowEnd.getTime() - DEFAULT_RESOLVED_WINDOW_DAYS * 86_400_000);
     const saleWhereForResolved = { ...parceiroWhere, status: ACTIVE_SALE_STATUS_FILTER };
 
     const alertedSaleIds = new Set<string>();
@@ -1416,11 +1457,30 @@ export class DashboardService {
 
     const evolucaoMensal = await this.computeEvolucaoMensal(now, activeRules, openRowsByRule, parceiroWhere);
 
+    // Ordena pelas linhas LEVES (sem buscar relação pesada nenhuma) — criticidade primeiro, e dentro da
+    // mesma criticidade, MAIOR diasEmAberto primeiro (quem está aberto há mais tempo é mais urgente numa
+    // lista acionável). Só depois de decidir os `limit` primeiros é que busca o detalhe pesado deles.
     const CRITICIDADE_RANK: Record<AlertCriticidade, number> = { "Crítico": 0, "Médio": 1, "Baixo": 2 };
-    const allItems = activeRules.flatMap((rule) => this.buildAlertItems(rule, openRowsByRule.get(rule) ?? [], now));
-    allItems.sort((a, b) => CRITICIDADE_RANK[a.criticidade] - CRITICIDADE_RANK[b.criticidade] || a.diasEmAberto - b.diasEmAberto);
-    const total = allItems.length;
-    const items = allItems.slice(0, limit);
+    const rankedRefs = activeRules.flatMap((rule) =>
+      (openRowsByRule.get(rule) ?? []).map((row) => ({
+        rule,
+        id: row.id,
+        criticidade: ALERT_RULE_META[rule].criticidade,
+        diasEmAberto: daysBetween(this.pickAlertTriggerDate(rule, row), now),
+      }))
+    );
+    rankedRefs.sort((a, b) => CRITICIDADE_RANK[a.criticidade] - CRITICIDADE_RANK[b.criticidade] || b.diasEmAberto - a.diasEmAberto);
+    const total = rankedRefs.length;
+    const topRefs = rankedRefs.slice(0, limit);
+
+    const detailRows = topRefs.length > 0 ? await this.fetchAlertDetailRows([...new Set(topRefs.map((r) => r.id))]) : [];
+    const detailById = new Map(detailRows.map((row) => [row.id, row]));
+    const items: OperationalAlertItem[] = topRefs
+      .map((ref) => {
+        const row = detailById.get(ref.id);
+        return row ? this.buildAlertItem(ref.rule, row, now) : null;
+      })
+      .filter((item): item is OperationalAlertItem => item !== null);
 
     const filterCatalog = await this.getFilterCatalog(dateWhere);
     const parceirosMap = new Map<string, string>();
