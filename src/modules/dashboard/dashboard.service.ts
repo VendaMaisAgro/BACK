@@ -344,9 +344,14 @@ const ACTIVE_SALE_STATUS_FILTER = { notIn: ["Cancelado", "Recusado pelo vendedor
  * Predicados das regras de alerta, extraídos pra serem reaproveitados pelo Pipeline (gargalos/contadores)
  * e pelos Alertas Operacionais, com os mesmos filtros de período/produto/comprador/vendedor/parceiro da
  * página — em vez de duplicar a lógica de negócio com um where escrito à mão em cada lugar.
+ * Todas retornam `{ AND: [baseDaRegra, extra] }` em vez de espalhar `...extra` no mesmo objeto: um
+ * spread direto sobrescreve silenciosamente qualquer chave que a regra e o `extra` tenham em comum —
+ * já aconteceu de verdade com `OR` (documentosPendentesWhere define o seu, buildParceiroWhere também,
+ * e o spread fazia o filtro de parceiro apagar a condição de documentos pendentes). Envolver os dois
+ * objetos em `AND` evita essa classe inteira de bug, não só o caso do `OR`.
  */
 function semPagamentoAntesColheitaWhere(now: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { plannedHarvestDate: { lte: now }, downPaymentCompleted: false, status: ACTIVE_SALE_STATUS_FILTER, ...extra };
+  return { AND: [{ plannedHarvestDate: { lte: now }, downPaymentCompleted: false, status: ACTIVE_SALE_STATUS_FILTER }, extra] };
 }
 /**
  * "Documentos pendentes": nota fiscal não enviada após embarque OU comprovante de pesagem
@@ -356,14 +361,18 @@ function semPagamentoAntesColheitaWhere(now: Date, extra: Record<string, unknown
  */
 function documentosPendentesWhere(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    shippedAt: { not: null },
-    status: ACTIVE_SALE_STATUS_FILTER,
-    OR: [{ operationDocuments: { none: { docType: "nota_fiscal" } } }, { weightDocumentId: null }],
-    ...extra,
+    AND: [
+      {
+        shippedAt: { not: null },
+        status: ACTIVE_SALE_STATUS_FILTER,
+        OR: [{ operationDocuments: { none: { docType: "nota_fiscal" } } }, { weightDocumentId: null }],
+      },
+      extra,
+    ],
   };
 }
 function entregaAtrasadaWhere(now: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { plannedDeliveryDate: { lt: now }, actualDeliveryDate: null, status: ACTIVE_SALE_STATUS_FILTER, ...extra };
+  return { AND: [{ plannedDeliveryDate: { lt: now }, actualDeliveryDate: null, status: ACTIVE_SALE_STATUS_FILTER }, extra] };
 }
 /**
  * paymentCompleted: false exclui vendas já totalmente pagas (etapa 9/10): o fluxo de criação de
@@ -374,10 +383,10 @@ function entregaAtrasadaWhere(now: Date, extra: Record<string, unknown> = {}): R
  */
 function pagamentoVencidoWhere(overdueCutoff: Date, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    status: ACTIVE_SALE_STATUS_FILTER,
-    paymentCompleted: false,
-    Payment: { some: { status: "pending", createdAt: { lt: overdueCutoff } } },
-    ...extra,
+    AND: [
+      { status: ACTIVE_SALE_STATUS_FILTER, paymentCompleted: false, Payment: { some: { status: "pending", createdAt: { lt: overdueCutoff } } } },
+      extra,
+    ],
   };
 }
 
