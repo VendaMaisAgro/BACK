@@ -405,6 +405,18 @@ export type AlertCriticidade = (typeof ALERT_CRITICIDADES)[number];
 type AlertRuleKey = "semPagamentoAntesColheita" | "documentosPendentes" | "entregaAtrasada" | "pagamentoVencido";
 
 /**
+ * Shape normalizado de fetchAlertTriggerRows — Payment só é buscado de verdade pra pagamentoVencido
+ * (única regra que precisa dele); as outras 3 recebem `Payment: []` sem consultar o banco pra relação.
+ */
+interface AlertTriggerRow {
+  id: string;
+  plannedHarvestDate: Date | null;
+  shippedAt: Date | null;
+  plannedDeliveryDate: Date | null;
+  Payment: { createdAt: Date }[];
+}
+
+/**
  * Categoria/criticidade/responsável/ação são fixos por TIPO de regra (não variam por venda) — mapeamento
  * direto do mockup (Financeiro=Crítico, Documentação/Logística=Médio). "Baixo" existe no tipo mas
  * nenhuma das 4 regras reais o produz hoje — reservado pra quando "sem termo aditivo" for modelado
@@ -1117,18 +1129,28 @@ export class DashboardService {
    * alertedSaleIds, que precisam de TODAS as linhas abertas mas não de detalhe nenhum — sem `take`
    * porque essas agregações genuinamente precisam do total, mas o select mínimo evita o scan pesado
    * (era o ponto problemático da versão anterior: buscava as relações completas pra cada linha aberta).
+   * A relação Payment só é buscada pra pagamentoVencido (única regra que precisa dela pra achar a data-
+   * gatilho) — nas outras 3, incluir esse join em toda linha aberta seria custo puro sem uso nenhum.
    */
-  private async fetchAlertTriggerRows(where: Record<string, unknown>) {
-    return this.prisma.saleData.findMany({
+  private async fetchAlertTriggerRows(rule: AlertRuleKey, where: Record<string, unknown>): Promise<AlertTriggerRow[]> {
+    if (rule === "pagamentoVencido") {
+      return this.prisma.saleData.findMany({
+        where,
+        select: {
+          id: true,
+          plannedHarvestDate: true,
+          shippedAt: true,
+          plannedDeliveryDate: true,
+          Payment: { where: { status: "pending" }, select: { createdAt: true }, orderBy: { createdAt: "asc" }, take: 1 },
+        },
+      });
+    }
+
+    const rows = await this.prisma.saleData.findMany({
       where,
-      select: {
-        id: true,
-        plannedHarvestDate: true,
-        shippedAt: true,
-        plannedDeliveryDate: true,
-        Payment: { where: { status: "pending" }, select: { createdAt: true }, orderBy: { createdAt: "asc" }, take: 1 },
-      },
+      select: { id: true, plannedHarvestDate: true, shippedAt: true, plannedDeliveryDate: true },
     });
+    return rows.map((row) => ({ ...row, Payment: [] }));
   }
 
   /** Dataset PESADO (buyer/boughtProducts/operationDocuments/weightDocumentId) — só pros ids que efetivamente entram em list.items (no máximo `limit`), nunca pro dataset aberto inteiro. */
@@ -1152,10 +1174,7 @@ export class DashboardService {
   }
 
   /** Data em que a condição do alerta passou a valer — base de diasEmAberto e do bucket mensal em evolucaoMensal. Aceita linha leve ou pesada (mesmos campos de data em ambas). */
-  private pickAlertTriggerDate(
-    rule: AlertRuleKey,
-    row: Awaited<ReturnType<DashboardService["fetchAlertTriggerRows"]>>[number]
-  ): Date {
+  private pickAlertTriggerDate(rule: AlertRuleKey, row: AlertTriggerRow): Date {
     switch (rule) {
       case "semPagamentoAntesColheita":
         return row.plannedHarvestDate as Date;
@@ -1251,16 +1270,34 @@ export class DashboardService {
         return resolvedSaleIds.size;
       }
       case "documentosPendentes": {
-        // documentosPendentesWhere cobre nota_fiscal E o comprovante de pesagem (ticket_balanca, o
-        // OperationDocument por trás de weightDocumentId — ver sales.service.ts) — a resolução precisa
-        // considerar os dois tipos. Dedup por saleId: nada garante um único documento do mesmo tipo por
-        // venda (reenvio de NF, por ex.), então sem o Set uma venda pode "resolver" mais de uma vez.
+        // documentosPendentesWhere é um OR (sem NF OU sem pesagem) — "resolvido" só quando os DOIS
+        // documentos existem hoje, não quando só um dos dois teve upload na janela (senão uma venda que
+        // ainda ficou com um documento pendente conta como resolvida). Por isso o filtro checa o estado
+        // ATUAL da venda (tem NF e weightDocumentId) além do evento de upload ter caído na janela.
         const rows = await this.prisma.operationDocument.findMany({
           where: { docType: { in: ["nota_fiscal", "ticket_balanca"] }, uploadedAt: { gte: windowStart, lt: windowEnd }, sale: saleWhere },
-          select: { saleId: true, uploadedAt: true, sale: { select: { shippedAt: true } } },
+          select: {
+            saleId: true,
+            uploadedAt: true,
+            sale: {
+              select: {
+                shippedAt: true,
+                weightDocumentId: true,
+                operationDocuments: { where: { docType: "nota_fiscal" }, select: { id: true }, take: 1 },
+              },
+            },
+          },
         });
         const resolvedSaleIds = new Set(
-          rows.filter((d) => d.sale.shippedAt && d.uploadedAt > d.sale.shippedAt).map((d) => d.saleId)
+          rows
+            .filter(
+              (d) =>
+                d.sale.shippedAt &&
+                d.uploadedAt > d.sale.shippedAt &&
+                d.sale.weightDocumentId &&
+                d.sale.operationDocuments.length > 0
+            )
+            .map((d) => d.saleId)
         );
         return resolvedSaleIds.size;
       }
@@ -1341,7 +1378,7 @@ export class DashboardService {
   private async computeEvolucaoMensal(
     now: Date,
     activeRules: AlertRuleKey[],
-    openRowsByRule: Map<AlertRuleKey, Awaited<ReturnType<DashboardService["fetchAlertTriggerRows"]>>>,
+    openRowsByRule: Map<AlertRuleKey, AlertTriggerRow[]>,
     parceiroWhere: Record<string, unknown>
   ): Promise<AlertMonthlyPoint[]> {
     const months = buildLastMonths(now, EVOLUTION_MONTHS);
@@ -1407,7 +1444,7 @@ export class DashboardService {
     };
 
     const openRowsEntries = await Promise.all(
-      activeRules.map(async (rule) => [rule, await this.fetchAlertTriggerRows(ruleWhere[rule])] as const)
+      activeRules.map(async (rule) => [rule, await this.fetchAlertTriggerRows(rule, ruleWhere[rule])] as const)
     );
     const openRowsByRule = new Map(openRowsEntries);
 
